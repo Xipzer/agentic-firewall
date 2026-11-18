@@ -34,8 +34,8 @@ Heuristics scale from simple (rate, reputation, geo) to non-trivial (behavioural
 
 ## Status
 
-Early design. Contributions, ideas and threat models welcome.
+Early design. Read [DESIGN.md](DESIGN.md) for the architecture, the AFP protocol draft and the roadmap. Contributions, ideas and threat models welcome.
 
 ## License
 
-TBD
+[Apache-2.0](LICENSE)
