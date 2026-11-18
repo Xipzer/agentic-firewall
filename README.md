@@ -40,6 +40,7 @@ Heuristics scale from simple (rate, reputation, geo) to non-trivial (behavioural
 - **Fast tier**: scores sources for scans (fast, slow, distributed), handshake failures, brute force, connection floods and reputation, then allows, throttles or drops through nftables. Every action expires.
 - **Host or gateway, or both**: the same engine runs in either place, and nodes share verdicts over signed **crosstalk** as advice, not commands.
 - **Safety rails**: protected subjects (auto-detected), spoof-aware actions, action budgets, TTLs, shadow mode, probation and `afw panic`.
+- **Cheap by design**: the kernel and heuristics handle floods with no model calls. Escalations fold into one incident per campaign, model attention is rationed, and it goes first to what a coverage ledger says is new.
 - **Explainable**: every verdict is logged with a plain-English explanation and the observations behind it, and can be replayed offline.
 
 ```sh

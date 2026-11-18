@@ -90,6 +90,14 @@ breakglass:
   sensitivity: 2          # thresholds halve while it is on
   budget_factor: 4        # action budget x4; every other rail unchanged
 
+# Model attention is rationed: escalations are folded into one incident per
+# campaign, and at most this many incidents per hour/day are queued for the
+# analyst tier (v0.3). Humans are never rationed.
+analyst:
+  per_hour: 10
+  per_day: 50
+  incident_window: 30m
+
 # Reputation feeds. Chosen and rated in docs/alpha-sources.md (18 Nov 2026).
 # Every entry is sanitised: private, reserved, protected and over-wide ranges
 # are removed, and a refresh that changes over max_change of a list is refused.

@@ -34,6 +34,7 @@ type Status struct {
 	Crosstalk    map[string]uint64            `json:"crosstalk,omitempty"`
 	Sensors      map[string]uint64            `json:"sensors,omitempty"`
 	JournalDrop  uint64                       `json:"journal_dropped"`
+	Incidents    map[string]uint64            `json:"incidents"`
 	Extra        map[string]map[string]uint64 `json:"-"`
 }
 
@@ -67,6 +68,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	if d.Bus != nil {
 		s.Crosstalk = d.Bus.Snapshot()
 	}
+	s.Incidents = d.Incidents.Stats()
 	if SensorStats != nil {
 		s.Sensors = SensorStats()
 	}
@@ -170,6 +172,9 @@ func (d *Daemon) ServeControl(ctx context.Context, path string, onPanic func()) 
 		_ = json.NewEncoder(w).Encode(v)
 	}
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { reply(w, d.Status(r.Context()), nil) })
+	mux.HandleFunc("GET /coverage", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, map[string]any{"coverage": d.Ledger.Report(d.Now()), "incidents": d.Incidents.Open()}, nil)
+	})
 	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]bool{"was_on_probation": d.Confirm()}, nil)
 	})

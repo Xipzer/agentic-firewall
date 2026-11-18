@@ -18,10 +18,12 @@ import (
 
 	"github.com/Xipzer/agentic-firewall/internal/afp"
 	"github.com/Xipzer/agentic-firewall/internal/config"
+	"github.com/Xipzer/agentic-firewall/internal/coverage"
 	"github.com/Xipzer/agentic-firewall/internal/crosstalk"
 	"github.com/Xipzer/agentic-firewall/internal/enforce"
 	"github.com/Xipzer/agentic-firewall/internal/fast"
 	"github.com/Xipzer/agentic-firewall/internal/guard"
+	"github.com/Xipzer/agentic-firewall/internal/incident"
 	"github.com/Xipzer/agentic-firewall/internal/journal"
 	"github.com/Xipzer/agentic-firewall/internal/netx"
 	"github.com/Xipzer/agentic-firewall/internal/posture"
@@ -32,16 +34,18 @@ import (
 const Agent = "heuristics-v1"
 
 type Daemon struct {
-	Cfg      config.Config
-	Log      *slog.Logger
-	Enforcer enforce.Enforcer
-	Journal  *journal.Journal
-	Feeds    *reputation.Manager
-	Bus      *crosstalk.Bus
-	Engine   *fast.Engine
-	Guard    *guard.Guard
-	Events   chan fast.Event
-	Posture  *posture.Controller
+	Cfg       config.Config
+	Log       *slog.Logger
+	Enforcer  enforce.Enforcer
+	Journal   *journal.Journal
+	Feeds     *reputation.Manager
+	Bus       *crosstalk.Bus
+	Engine    *fast.Engine
+	Guard     *guard.Guard
+	Events    chan fast.Event
+	Posture   *posture.Controller
+	Ledger    *coverage.Ledger
+	Incidents *incident.Grouper
 	// Now is the clock; replaceable in tests.
 	Now func() time.Time
 
@@ -109,6 +113,10 @@ func (d *Daemon) Init() error {
 	pc.Auto, pc.MinRate, pc.Surge, pc.AbsRate, pc.FailRatio = bg.Auto, bg.MinRate, bg.Surge, bg.AbsRate, bg.FailRatio
 	pc.Hold, pc.ManualHold = bg.Hold.D(), bg.ManualHold.D()
 	d.Posture = posture.New(pc)
+	d.Ledger = coverage.New()
+	ic := incident.DefaultConfig()
+	ic.AnalystPerHour, ic.AnalystPerDay, ic.Window = d.Cfg.Analyst.PerHour, d.Cfg.Analyst.PerDay, d.Cfg.Analyst.IncidentWindow.D()
+	d.Incidents = incident.New(ic)
 	if d.Journal == nil {
 		j, err := journal.Open(d.Cfg.Log.Path, d.Cfg.Log.MaxMB, d.Cfg.Log.Keep)
 		if err != nil {
@@ -199,10 +207,33 @@ func (d *Daemon) loop(ctx context.Context) {
 
 func (d *Daemon) ingest(ev fast.Event) {
 	d.Engine.Ingest(ev)
+	dir := d.Engine.Direction(ev.Src.Addr().Unmap(), ev.Dst.Addr().Unmap())
+	d.Ledger.Observe(ev, dir)
 	if d.Cfg.Log.Observations == "all" {
-		dir := d.Engine.Direction(ev.Src.Addr().Unmap(), ev.Dst.Addr().Unmap())
 		d.Journal.Write(ev.Observation(afp.Source{Tier: afp.TierDataplane, Agent: "sensor", Node: d.Cfg.Node}, dir))
 	}
+}
+
+// escalate records an escalation through the incident grouper, which folds
+// repeats of the same campaign and rations analyst attention.
+func (d *Daemon) escalate(e *afp.Escalation, asset string, now time.Time) {
+	novel := false
+	if e.Class != "" {
+		novel = d.Ledger.Classified(asset, e.Class, now)
+	}
+	if asset != "" && d.Ledger.Novelty(asset, now) >= 0.5 {
+		novel = true
+	}
+	if out := d.Incidents.Admit(e, novel, now); out != nil {
+		d.Journal.Write(out)
+	}
+}
+
+func assetOf(dec fast.Decision) string {
+	if n := len(dec.Evidence); n > 0 {
+		return coverage.AssetOf(dec.Evidence[n-1], dec.Direction)
+	}
+	return ""
 }
 
 func (d *Daemon) tick(ctx context.Context, now time.Time) {
@@ -232,7 +263,9 @@ func (d *Daemon) decide(dec fast.Decision, now time.Time) *afp.Verdict {
 	d.Journal.Write(v)
 	d.Journal.Write(explain(v, &dec, out))
 	if v.Escalate || out.BudgetExhausted {
-		d.Journal.Write(escalation(v, &dec, out))
+		d.escalate(escalation(v, &dec, out), assetOf(dec), now)
+	} else if v.Class != "" {
+		d.Ledger.Classified(assetOf(dec), v.Class, now)
 	}
 	if out.Enforce && (v.Action == afp.ActionDrop || v.Action == afp.ActionThrottle) {
 		ttl, _ := afp.ParseTTL(v.TTL)
@@ -501,7 +534,7 @@ func (d *Daemon) onPostureChange(ctx context.Context, now time.Time) {
 			Priority: "critical", Target: afp.TierHuman, Class: "dos.flood", Deadline: afp.FormatTTL(d.Cfg.BreakGlass.Hold.D()),
 			Question: "Break-glass is on: " + reasons + ". Trusted sources keep full access and newcomers share a capped lane. Is this an attack to ride out, or legitimate demand (a launch, a backup) that needs `afw breakglass off`?"}
 		e.TS = now.UTC()
-		d.Journal.Write(e)
+		d.escalate(e, "", now)
 		d.Log.Warn("BREAK-GLASS on", "reasons", reasons)
 	} else {
 		d.Log.Info("posture", "level", lvl.String(), "reasons", reasons)

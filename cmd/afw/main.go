@@ -33,6 +33,7 @@ const usage = `afw: agentic firewall (AFP v0.1)
 Usage:
   afw run      [-c config.yaml]           run the daemon (needs root or CAP_NET_ADMIN)
   afw status   [-c config.yaml]           show mode, protected subjects, counters and feeds
+  afw coverage [-c config.yaml]           what has been examined, how saturated, open incidents
   afw confirm  [-c config.yaml]           keep enforcing after the probation window
   afw mode     shadow|enforce [-c ...]    switch mode live
   afw unblock  <ip|cidr> [-grace 1h]      lift an action and hold the subject in grace
@@ -60,6 +61,8 @@ func main() {
 		err = run(*cfgPath)
 	case "status":
 		err = control(*cfgPath, http.MethodGet, "/status", nil)
+	case "coverage":
+		err = control(*cfgPath, http.MethodGet, "/coverage", nil)
 	case "confirm":
 		err = control(*cfgPath, http.MethodPost, "/confirm", nil)
 	case "mode":

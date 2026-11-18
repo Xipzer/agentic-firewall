@@ -191,6 +191,7 @@ type Escalation struct {
 	Deadline string         `json:"deadline,omitempty"`
 	Target   Tier           `json:"target,omitempty"`
 	Class    string         `json:"class,omitempty"`
+	Incident string         `json:"incident,omitempty"`
 	Context  map[string]any `json:"context,omitempty"`
 }
 

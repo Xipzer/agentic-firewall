@@ -49,6 +49,7 @@ type Config struct {
 	Policy         Policy
 	Budget         Budget
 	BreakGlass     BreakGlass `yaml:"breakglass"`
+	Analyst        Analyst
 	Feeds          []Feed
 	Crosstalk      Crosstalk
 	Log            Log
@@ -108,6 +109,14 @@ type BreakGlass struct {
 	PerSourceRate string   `yaml:"per_source_rate"`
 	Sensitivity   float64  `yaml:"sensitivity"`
 	BudgetFactor  float64  `yaml:"budget_factor"`
+}
+
+// Analyst rations model attention (the slow tier) so that escalation floods
+// cannot run up token costs. Humans are never rationed.
+type Analyst struct {
+	PerHour        int      `yaml:"per_hour"`
+	PerDay         int      `yaml:"per_day"`
+	IncidentWindow Duration `yaml:"incident_window"`
 }
 
 type Feed struct {
@@ -186,6 +195,7 @@ func Default() Config {
 		BreakGlass: BreakGlass{Auto: true, MinRate: 100, Surge: 5, AbsRate: 2000, FailRatio: 0.6,
 			Hold: Duration(10 * time.Minute), ManualHold: Duration(time.Hour), NewcomerRate: 200,
 			PerSourceRate: "2/second", Sensitivity: 2, BudgetFactor: 4},
+		Analyst:       Analyst{PerHour: 10, PerDay: 50, IncidentWindow: Duration(30 * time.Minute)},
 		Crosstalk:     Crosstalk{MaxSkew: Duration(2 * time.Minute), MaxTTL: Duration(time.Hour), PerMinute: 120},
 		Log:           Log{Path: "/var/log/afw/afw.jsonl", MaxMB: 50, Keep: 5, Observations: "evidence"},
 		NFT:           NFT{Binary: "nft", Table: "afw", LogGroup: 7, LogRate: 1000, OnExit: "keep"},
@@ -251,6 +261,9 @@ func (c *Config) Validate() error {
 	if b := c.BreakGlass; b.MinRate <= 0 || b.Surge < 1.5 || b.AbsRate <= b.MinRate || b.FailRatio <= 0 || b.FailRatio > 1 ||
 		b.Hold <= 0 || b.NewcomerRate <= 0 || b.Sensitivity < 1 || b.BudgetFactor < 1 || b.BudgetFactor > 20 {
 		errs = append(errs, errors.New("breakglass: need min_rate > 0, surge >= 1.5, abs_rate > min_rate, 0 < fail_ratio <= 1, hold > 0, newcomer_rate > 0, sensitivity >= 1, 1 <= budget_factor <= 20"))
+	}
+	if c.Analyst.PerHour < 0 || c.Analyst.PerDay < c.Analyst.PerHour || c.Analyst.IncidentWindow <= 0 {
+		errs = append(errs, errors.New("analyst: need 0 <= per_hour <= per_day and incident_window > 0"))
 	}
 	if c.MaxSubjects < 128 {
 		errs = append(errs, errors.New("max_subjects must be at least 128"))

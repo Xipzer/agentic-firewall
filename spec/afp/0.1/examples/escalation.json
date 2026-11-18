@@ -20,5 +20,10 @@
   "priority": "normal",
   "deadline": "10m",
   "target": "medium",
-  "class": "dos.syn-flood"
+  "class": "dos.syn-flood",
+  "incident": "inc_01",
+  "context": {
+    "incident_escalations": 41,
+    "analyst": "queued"
+  }
 }

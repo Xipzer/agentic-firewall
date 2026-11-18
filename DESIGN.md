@@ -58,6 +58,24 @@ A SYN or a UDP packet can carry any source address. Evidence built only from the
 
 An attacker partly controls what an active defence sees, so the design guarantees that the worst they can make it do costs less than what it stops. The key rule is **harm direction**: a verdict built from what a subject sent us only limits what that subject can start, and never touches connections we start. Forgeable evidence can only throttle, proven history earns immunity from forged evidence, and only proven evidence lengthens punishment. The full rule set, including binding rules for the LLM tier, is in [docs/self-harm.md](docs/self-harm.md).
 
+### Cost: the cheapest tier that can decide, decides
+
+Security that reasons with a model about every packet is expensive and slow, and the expense is itself an attack surface (an attacker who can trigger reasoning can run up the bill). afw is built as a cost ladder:
+
+| Rung | Cost per decision | Handles |
+|---|---|---|
+| Kernel sets and rules | nanoseconds, no CPU in afw | everything already decided: reputation, active verdicts, the break-glass lane |
+| Fast tier heuristics | microseconds | every new flow |
+| Incident grouper | one map lookup | every escalation: folds a campaign into one incident |
+| Model analyst (v0.3) | tokens, rationed per hour and day | only new incidents, least-saturated first |
+| Human | attention | critical incidents and anything a rail refused |
+
+Each rung exists to keep work off the next one. Model conclusions compile down into kernel rules, so repeated attacks move down the ladder and get cheaper. In the kernel lab, a flood of 240,000 attempts was handled entirely on the first two rungs, with no model call.
+
+### Coverage saturation: spend attention where it buys the most
+
+afw keeps a ledger of what it has examined, per asset (each local service, each LAN device's outbound behaviour): flows, distinct source ranges, attack classes seen, and **saturation**, the share of recent activity that brought nothing new. A saturated asset is routine and needs no extra attention. A sudden drop in saturation (new kinds of sources or attacks) raises escalations to high priority and puts them first in the analyst queue. `afw coverage` shows the least-saturated assets first, plus which classes of the attack universe have actually been exercised.
+
 ### Break-glass and coverage
 
 When a flood harms the service and there is nobody specific to block, afw breaks glass: trusted users, protected hosts and the LAN keep full access, everyone else shares a capped lane enforced before connection tracking, and connection-table slots held by half-open attackers are reclaimed. Every verdict and escalation is classified (`class`, e.g. `access.bruteforce`), and [docs/attack-universe.md](docs/attack-universe.md) maps the whole attack universe to what afw can see, name and stop, with the gaps listed.
