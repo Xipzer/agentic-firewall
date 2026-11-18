@@ -272,6 +272,12 @@ func TestLabEndToEnd(t *testing.T) {
 	if err := dial(bystander, target+":22", time.Second); err != nil {
 		t.Fatalf("bystander collateral: %v", err)
 	}
+	// A blocked subject can no longer start connections to us, but anything
+	// we start towards it still works: a block can never cut us off.
+	listen(t, bruteSrc+":8443")
+	if err := dial(target, bruteSrc+":8443", time.Second); err != nil {
+		t.Fatalf("our outbound connection to a dropped subject failed: %v", err)
+	}
 
 	// 3. A protected subject behaving badly is only observed.
 	brute(protected, 30)

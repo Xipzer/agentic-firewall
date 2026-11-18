@@ -23,8 +23,11 @@ func subjectOf(d fast.Decision) afp.Subject {
 func verdictFrom(d fast.Decision, src afp.Source, throttleRate string) (*afp.Verdict, []*afp.Observation) {
 	v := &afp.Verdict{Envelope: afp.NewEnvelope(afp.TypeVerdict, src), Subject: subjectOf(d), Action: d.Action,
 		Confidence: d.Score, TTL: afp.FormatTTL(d.TTL), Reason: d.Reason, Escalate: d.Escalate, Signals: d.Signals}
-	if d.Action == afp.ActionThrottle {
-		v.Params = map[string]any{"rate": throttleRate, "scope": "new connections"}
+	switch d.Action {
+	case afp.ActionThrottle:
+		v.Params = map[string]any{"rate": throttleRate, "scope": "new connections the subject starts"}
+	case afp.ActionDrop:
+		v.Params = map[string]any{"scope": "connections the subject starts; replies to ours still flow"}
 	}
 	obsSrc := afp.Source{Tier: afp.TierDataplane, Agent: "sensor", Node: src.Node}
 	var obs []*afp.Observation

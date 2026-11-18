@@ -54,6 +54,10 @@ When both run, they are **independent but linked** through **crosstalk**: each n
 
 A SYN or a UDP packet can carry any source address. Evidence built only from them is marked `spoofable` and can at most **throttle new connections** from that source, never drop it, so an attacker cannot make the firewall cut you off from your DNS resolver by faking its address. Only evidence that needed a completed handshake (or a trusted peer's proven verdict) can drop.
 
+### The defence must not be turnable against us
+
+An attacker partly controls what an active defence sees, so the design guarantees that the worst they can make it do costs less than what it stops. The key rule is **harm direction**: a verdict built from what a subject sent us only limits what that subject can start, and never touches connections we start. Forgeable evidence can only throttle, proven history earns immunity from forged evidence, and only proven evidence lengthens punishment. The full rule set, including binding rules for the LLM tier, is in [docs/self-harm.md](docs/self-harm.md).
+
 ## Protocol (AFP, Agentic Firewall Protocol)
 
 Transport-agnostic messages, JSON for the reference implementation, protobuf later. Every message has `afp` (version), `id`, `ts` and `source` (tier + agent id, optional `node`).

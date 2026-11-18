@@ -4,11 +4,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -86,6 +89,7 @@ func (d *Daemon) Init() error {
 	}
 	d.Engine = fast.New(fast.Params{H: d.Cfg.Heuristics, P: d.Cfg.Policy, Local: local, Internal: internal,
 		SensitivePorts: d.Cfg.SensitivePorts, ServicePorts: d.Cfg.ServicePorts, MaxSubjects: d.Cfg.MaxSubjects, Rep: d.Feeds})
+	d.loadTrust()
 	if d.Journal == nil {
 		j, err := journal.Open(d.Cfg.Log.Path, d.Cfg.Log.MaxMB, d.Cfg.Log.Keep)
 		if err != nil {
@@ -94,7 +98,9 @@ func (d *Daemon) Init() error {
 		d.Journal = j
 	}
 	if d.Enforcer == nil {
-		d.Enforcer = enforce.NewNFT(d.Cfg.NFT.Binary, d.Cfg.NFT.Table, d.Cfg.NFT.LogGroup, d.Cfg.NFT.LogRate, d.Cfg.Policy.ThrottleRate)
+		n := enforce.NewNFT(d.Cfg.NFT.Binary, d.Cfg.NFT.Table, d.Cfg.NFT.LogGroup, d.Cfg.NFT.LogRate, d.Cfg.Policy.ThrottleRate)
+		n.SensitivePorts = d.Cfg.SensitivePorts
+		d.Enforcer = n
 	}
 	if d.Bus == nil && len(d.Cfg.Crosstalk.Peers) > 0 {
 		key, err := crosstalk.LoadKey(d.Cfg.Crosstalk.KeyFile)
@@ -140,6 +146,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.loop(ctx)
 	wg.Wait()
+	d.saveTrust()
 	d.Journal.Flush()
 	close(d.done)
 	if d.Cfg.NFT.OnExit == "teardown" && !d.panicked {
@@ -323,6 +330,9 @@ func (d *Daemon) housekeeping(ctx context.Context) {
 		case <-t.C:
 		}
 		d.Journal.Flush()
+		if n%10 == 9 {
+			d.do(d.saveTrust)
+		}
 		if n%5 != 4 {
 			continue
 		}
@@ -366,6 +376,32 @@ func (d *Daemon) setMode(ctx context.Context, mode string) error {
 		d.pushReputation(ctx)
 	}
 	return nil
+}
+
+func (d *Daemon) trustPath() string { return filepath.Join(d.Cfg.StateDir, "trust.json") }
+
+// loadTrust restores earned trust. A missing or corrupt file just means no
+// source starts out trusted, which is the safe direction.
+func (d *Daemon) loadTrust() {
+	b, err := os.ReadFile(d.trustPath())
+	if err != nil {
+		return
+	}
+	var m map[string]fast.TrustRecord
+	if json.Unmarshal(b, &m) == nil {
+		d.Engine.LoadTrust(m)
+	}
+}
+
+func (d *Daemon) saveTrust() {
+	b, err := json.Marshal(d.Engine.TrustSnapshot())
+	if err != nil || os.MkdirAll(d.Cfg.StateDir, 0o750) != nil {
+		return
+	}
+	tmp := d.trustPath() + ".tmp"
+	if os.WriteFile(tmp, b, 0o640) == nil {
+		_ = os.Rename(tmp, d.trustPath())
+	}
 }
 
 // do runs f on the event loop goroutine and waits for it.

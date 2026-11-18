@@ -53,7 +53,9 @@ type Decision struct {
 	SpoofLimited  bool
 	PeerDerived   bool
 	Offences      int
-	Reason        string
+	// Incumbent subjects have a proven history of legitimate sessions with us.
+	Incumbent bool
+	Reason    string
 	Evidence      []Event
 	Direction     Direction
 }
@@ -119,6 +121,7 @@ type Engine struct {
 	offences map[netip.Prefix]int
 	grace    map[netip.Prefix]time.Time
 	ended    map[flowKey]time.Time
+	trust    map[netip.Prefix]*TrustRecord
 	sens     map[uint16]bool
 	svc      map[uint16]bool
 	Stats    Stats
@@ -136,7 +139,7 @@ func New(p Params) *Engine {
 	}
 	e := &Engine{p: p, subjects: map[netip.Prefix]*subject{}, lru: list.New(), flows: map[flowKey]*flowRec{},
 		dirty: map[netip.Prefix]struct{}{}, active: map[netip.Prefix]activeAction{}, offences: map[netip.Prefix]int{},
-		grace: map[netip.Prefix]time.Time{}, ended: map[flowKey]time.Time{}, sens: map[uint16]bool{}, svc: map[uint16]bool{}}
+		grace: map[netip.Prefix]time.Time{}, ended: map[flowKey]time.Time{}, trust: map[netip.Prefix]*TrustRecord{}, sens: map[uint16]bool{}, svc: map[uint16]bool{}}
 	for _, port := range p.SensitivePorts {
 		e.sens[port] = true
 	}
@@ -345,6 +348,8 @@ func (e *Engine) onEnd(ev Event, key flowKey, src, dst netip.Addr, dir Direction
 				n = 2
 			}
 			x.short.add(ev.Time, n)
+		case rec.established && k == rec.subj && !x.internal && ev.Time.Sub(rec.start) >= TrustSession:
+			e.recordTrust(k, ev.Time)
 		}
 		x.remember(ev)
 		e.dirty[k] = struct{}{}
@@ -363,6 +368,77 @@ func (e *Engine) markEnded(k flowKey, t time.Time) {
 func (e *Engine) recentlyEnded(k flowKey, now time.Time) bool {
 	t, ok := e.ended[k]
 	return ok && now.Sub(t) < 5*time.Minute
+}
+
+// TrustSession is how long a completed session must last to count as
+// legitimate use. Login guessing and scanning never last this long.
+const TrustSession = 30 * time.Second
+
+const maxTrust = 8192
+
+// TrustRecord is a source's history of legitimate sessions. It needs real
+// sessions on at least two different days, so it cannot be built in one
+// sitting just before an attack.
+type TrustRecord struct {
+	Sessions int       `json:"sessions"`
+	Days     int       `json:"days"`
+	LastDay  int64     `json:"last_day"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+func (e *Engine) recordTrust(k netip.Prefix, t time.Time) {
+	r, ok := e.trust[k]
+	if !ok {
+		if len(e.trust) >= maxTrust {
+			e.evictTrust()
+		}
+		r = &TrustRecord{}
+		e.trust[k] = r
+	}
+	r.Sessions++
+	if day := t.Unix() / 86400; day != r.LastDay {
+		r.Days++
+		r.LastDay = day
+	}
+	r.LastSeen = t
+}
+
+func (e *Engine) evictTrust() {
+	var oldest netip.Prefix
+	var ot time.Time
+	for k, r := range e.trust {
+		if ot.IsZero() || r.LastSeen.Before(ot) {
+			oldest, ot = k, r.LastSeen
+		}
+	}
+	delete(e.trust, oldest)
+}
+
+// Incumbent reports whether a subject has earned trust: 3+ long sessions on
+// 2+ days, the last one within 30 days.
+func (e *Engine) Incumbent(k netip.Prefix, now time.Time) bool {
+	r, ok := e.trust[k]
+	return ok && r.Sessions >= 3 && r.Days >= 2 && now.Sub(r.LastSeen) < 30*24*time.Hour
+}
+
+// TrustSnapshot and LoadTrust persist earned trust across restarts.
+func (e *Engine) TrustSnapshot() map[string]TrustRecord {
+	out := make(map[string]TrustRecord, len(e.trust))
+	for k, r := range e.trust {
+		out[k.String()] = *r
+	}
+	return out
+}
+
+func (e *Engine) LoadTrust(m map[string]TrustRecord) {
+	for k, r := range m {
+		p, err := netip.ParsePrefix(k)
+		if err != nil || r.Sessions < 0 || r.Days < 0 || len(e.trust) >= maxTrust {
+			continue
+		}
+		rec := r
+		e.trust[p.Masked()] = &rec
+	}
 }
 
 // AddPeer records evidence about a subject reported by another node.
@@ -581,6 +657,16 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 	}
 	score, nonSpoof := combine(sigs, false), combine(sigs, true)
 	act, spoofLimited := e.actionFor(score, nonSpoof)
+	incumbent := !s.agg && !s.internal && e.Incumbent(s.key, now)
+	if incumbent {
+		// A source with a proven history of real sessions is judged on proven
+		// evidence only. Spoofed packets carrying its address can at most get
+		// it watched, so an attacker cannot use its identity against us.
+		act, spoofLimited = e.actionFor(nonSpoof, nonSpoof)
+		if act == "" && score >= e.p.P.Observe {
+			act = afp.ActionObserve
+		}
+	}
 	if act == "" {
 		return Decision{}, false
 	}
@@ -601,7 +687,10 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 	}
 	offences := e.offences[s.key]
 	alreadyEnforced := has && now.Before(cur.until) && cur.action.Severity() >= afp.ActionThrottle.Severity()
-	if act.Severity() >= afp.ActionThrottle.Severity() && (!alreadyEnforced || cur.until.Sub(now) < e.p.P.BaseTTL.D()/4) {
+	// Only proven evidence lengthens punishment. Otherwise an attacker spoofing
+	// a victim's address could ratchet the victim's throttle up to 24 hours.
+	proven := !spoofLimited && nonSpoof >= e.p.P.Throttle
+	if proven && act.Severity() >= afp.ActionThrottle.Severity() && (!alreadyEnforced || cur.until.Sub(now) < e.p.P.BaseTTL.D()/4) {
 		offences++
 		e.offences[s.key] = offences
 		if len(e.offences) > e.p.MaxSubjects {
@@ -615,8 +704,8 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 	e.active[s.key] = activeAction{action: act, until: now.Add(ttl), peer: peerDerived, spoof: spoofLimited}
 	d := Decision{Subject: s.key, Action: act, Score: round(score), NonSpoofScore: round(nonSpoof), TTL: ttl,
 		Signals: sigs, Internal: s.internal, Aggregate: s.agg, SpoofLimited: spoofLimited, PeerDerived: peerDerived,
-		Offences: offences, Evidence: slices.Clone(s.evidence), Direction: s.dir}
-	d.Escalate = !s.benign && (spoofLimited || s.internal || s.agg || (act != afp.ActionObserve && score < 0.9))
+		Offences: offences, Evidence: slices.Clone(s.evidence), Direction: s.dir, Incumbent: incumbent}
+	d.Escalate = !s.benign && (spoofLimited || s.internal || s.agg || incumbent || (act != afp.ActionObserve && score < 0.9))
 	d.Reason = reason(d)
 	return d, true
 }
@@ -641,6 +730,9 @@ func reason(d Decision) string {
 	r := strings.Join(parts, "; ")
 	if d.SpoofLimited {
 		r += " (evidence is spoofable, so throttled rather than dropped)"
+	}
+	if d.Incumbent {
+		r += " (source has a history of legitimate sessions: judged on proven evidence only; may be a shared address)"
 	}
 	return r
 }

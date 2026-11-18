@@ -279,3 +279,68 @@ func TestIPv6RotationWithinSlash64(t *testing.T) {
 		t.Fatalf("rotating v6 scanner not grouped by /64: %+v ok=%v", d, ok)
 	}
 }
+
+// longSession records a real, completed session from src lasting a minute.
+func (s *sim) longSession(at time.Time, src string, port int) {
+	sp := addrport(src, port)
+	s.ev(at, KindNew, sp, "192.168.1.2:443")
+	s.ev(at.Add(50*time.Millisecond), KindEstablished, sp, "192.168.1.2:443")
+	s.ev(at.Add(time.Minute), KindEnd, sp, "192.168.1.2:443")
+}
+
+func TestIncumbentCannotBeFramedBySpoofing(t *testing.T) {
+	s := newSim()
+	phone := "82.132.1.50"
+	// Three real sessions over two days earn trust. One day is not enough.
+	s.longSession(s.at(0), phone, 40001)
+	s.longSession(s.at(2*time.Hour), phone, 40002)
+	s.longSession(s.at(4*time.Hour), phone, 40003)
+	if s.e.Incumbent(netip.MustParsePrefix(phone+"/32"), s.now) {
+		t.Fatal("trust earned in a single day")
+	}
+	s.longSession(s.at(26*time.Hour), phone, 40004)
+	if !s.e.Incumbent(netip.MustParsePrefix(phone+"/32"), s.now) {
+		t.Fatal("trust not earned after sessions on two days")
+	}
+	// Attacker spoofs a SYN scan "from" the phone.
+	base := s.at(27 * time.Hour)
+	for i := 0; i < 300; i++ {
+		s.ev(base.Add(time.Duration(i)*10*time.Millisecond), KindNew, addrport(phone, 50000), addrport("192.168.1.2", 1000+i))
+	}
+	s.advance(base.Add(10 * time.Second))
+	for _, d := range s.out {
+		if d.Subject.Addr().String() == phone && d.Action != afp.ActionObserve {
+			t.Fatalf("spoofed evidence acted on an incumbent: %+v", d)
+		}
+	}
+	// Real brute force from the same address is still stopped.
+	base = s.at(28 * time.Hour)
+	for i := 0; i < 40; i++ {
+		at := base.Add(time.Duration(i) * time.Second)
+		sp := addrport(phone, 51000+i)
+		s.ev(at, KindNew, sp, "192.168.1.2:22")
+		s.ev(at.Add(40*time.Millisecond), KindEstablished, sp, "192.168.1.2:22")
+		s.ev(at.Add(time.Second), KindEnd, sp, "192.168.1.2:22")
+	}
+	s.advance(base.Add(45 * time.Second))
+	d, _ := s.last(phone + "/32")
+	if d.Action != afp.ActionDrop || !d.Incumbent || !d.Escalate {
+		t.Fatalf("proven abuse from an incumbent should drop and escalate: %+v", d)
+	}
+}
+
+func TestSpoofedEvidenceNeverLengthensPunishment(t *testing.T) {
+	s := newSim()
+	victim := "8.8.4.4"
+	for round := 0; round < 4; round++ {
+		base := time.Duration(round) * time.Hour
+		for i := 0; i < 200; i++ {
+			s.ev(s.at(base+time.Duration(i)*20*time.Millisecond), KindNew, addrport(victim, 53), addrport("192.168.1.2", 1000+i))
+		}
+		s.advance(s.at(base + 15*time.Second))
+		d, _ := s.last(victim + "/32")
+		if d.Action != afp.ActionThrottle || d.TTL != 10*time.Minute {
+			t.Fatalf("round %d: spoofable evidence gave %s for %v", round, d.Action, d.TTL)
+		}
+	}
+}

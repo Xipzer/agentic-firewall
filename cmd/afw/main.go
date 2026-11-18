@@ -263,6 +263,7 @@ func ruleset(cfgPath string) error {
 		return err
 	}
 	n := enforce.NewNFT(cfg.NFT.Binary, cfg.NFT.Table, cfg.NFT.LogGroup, cfg.NFT.LogRate, cfg.Policy.ThrottleRate)
+	n.SensitivePorts = cfg.SensitivePorts
 	prot := cfg.ProtectedPrefixes()
 	if cfg.AutoProtectEnabled() {
 		prot = append(prot, config.Discover().All()...)

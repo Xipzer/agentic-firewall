@@ -26,7 +26,9 @@ type NFT struct {
 	LogGroup     uint16
 	LogRate      int
 	ThrottleRate string
-	Env          []string
+	// SensitivePorts get a separate sampling budget.
+	SensitivePorts []uint16
+	Env            []string
 	// Run executes an nft script; replaceable in tests.
 	Run func(ctx context.Context, script string) ([]byte, error)
 	// Query runs nft with args (JSON output); replaceable in tests.
@@ -93,34 +95,44 @@ table inet {{.T}} {
 	counter drop_egress {}
 	counter throttled {}
 
-	# Before conntrack: dropped floods never create connection state.
+	# Before conntrack: reputation drops (curated lists of hijacked or
+	# criminal networks) so floods from them never create connection state.
 	chain pre {
 		type filter hook prerouting priority -300; policy accept;
 		ip saddr @protect4 accept
 		ip6 saddr @protect6 accept
 {{- if not .ObserveOnly}}
-		ip saddr @drop4 counter name drop_verdict drop
-		ip6 saddr @drop6 counter name drop_verdict drop
 		ip saddr @repin4 counter name drop_reputation drop
 		ip6 saddr @repin6 counter name drop_reputation drop
 		ip daddr @protect4 accept
 		ip6 daddr @protect6 accept
-		ip daddr @drop4 counter name drop_egress drop
-		ip6 daddr @drop6 counter name drop_egress drop
 		ip daddr @repout4 counter name drop_egress drop
 		ip6 daddr @repout6 counter name drop_egress drop
 {{- end}}
 	}
 
-	# After conntrack: sample new flows for the fast tier, then throttle
-	# only unsolicited new connections, so replies to our own traffic are
-	# never slowed even if an attacker spoofs a source we talk to.
+	# After conntrack. Sampling first, so evidence keeps flowing while a
+	# source is restricted. Logins and admin ports get their own sampling
+	# budget, so a noise flood cannot blind afw to a brute force.
+	#
+	# Verdicts act only on connections the subject starts (ct direction
+	# original). Replies to connections we start are never touched, so an
+	# attacker who gets a shared or spoofed address blocked cannot cut us off
+	# from a service we use: the worst outcome is that address cannot open
+	# new connections to us.
 	chain observe {
 		type filter hook prerouting priority -150; policy accept;
+{{- if .Sensitive}}
+		ct state new tcp dport { {{.Sensitive}} } limit rate {{.SensRate}}/second burst {{.SensRate}} packets log group {{.LogGroup}} snaplen 96
+		ct state new meta l4proto { tcp, udp } th dport != { {{.Sensitive}} } limit rate {{.LogRate}}/second burst {{.LogRate}} packets log group {{.LogGroup}} snaplen 96
+{{- else}}
 		ct state new meta l4proto { tcp, udp } limit rate {{.LogRate}}/second burst {{.LogRate}} packets log group {{.LogGroup}} snaplen 96
+{{- end}}
 {{- if not .ObserveOnly}}
-		ct state new ip saddr @protect4 accept
-		ct state new ip6 saddr @protect6 accept
+		ip saddr @protect4 accept
+		ip6 saddr @protect6 accept
+		ip saddr @drop4 ct direction original counter name drop_verdict drop
+		ip6 saddr @drop6 ct direction original counter name drop_verdict drop
 		ct state new ip saddr @thr4 add @thrm4 { ip saddr limit rate over {{.Rate}} } counter name throttled drop
 		ct state new ip6 saddr @thr6 add @thrm6 { ip6 saddr limit rate over {{.Rate}} } counter name throttled drop
 		ct state new ip saddr @repthr4 add @thrm4 { ip saddr limit rate over {{.Rate}} } counter name throttled drop
@@ -133,8 +145,6 @@ table inet {{.T}} {
 		ip daddr @protect4 accept
 		ip6 daddr @protect6 accept
 {{- if not .ObserveOnly}}
-		ip daddr @drop4 counter name drop_egress drop
-		ip6 daddr @drop6 counter name drop_egress drop
 		ip daddr @repout4 counter name drop_egress drop
 		ip6 daddr @repout6 counter name drop_egress drop
 {{- end}}
@@ -178,9 +188,15 @@ func (n *NFT) Ruleset(protected []netip.Prefix, observeOnly bool) string {
 	if rate == "" {
 		rate = "5/second"
 	}
+	var ports []string
+	for _, p := range n.SensitivePorts {
+		ports = append(ports, fmt.Sprint(p))
+	}
+	sensRate := max(n.LogRate/4, 50)
 	var b strings.Builder
 	_ = rulesetTmpl.Execute(&b, map[string]any{"T": n.Table, "P4": elements(p4), "P6": elements(p6),
-		"ObserveOnly": observeOnly, "LogGroup": n.LogGroup, "LogRate": n.LogRate, "Rate": rate})
+		"ObserveOnly": observeOnly, "LogGroup": n.LogGroup, "LogRate": n.LogRate, "Rate": rate,
+		"Sensitive": strings.Join(ports, ", "), "SensRate": sensRate})
 	return b.String()
 }
 

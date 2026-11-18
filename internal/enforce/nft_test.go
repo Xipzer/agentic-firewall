@@ -12,6 +12,7 @@ import (
 
 func fakeNFT() (*NFT, *[]string) {
 	n := NewNFT("nft", "afw", 7, 1000, "5/second")
+	n.SensitivePorts = []uint16{22, 3389}
 	var scripts []string
 	n.Run = func(_ context.Context, s string) ([]byte, error) { scripts = append(scripts, s); return nil, nil }
 	n.Query = func(context.Context, ...string) ([]byte, error) { return []byte(`{"nftables":[]}`), nil }
@@ -24,16 +25,20 @@ func TestRulesetShape(t *testing.T) {
 	for _, want := range []string{
 		"delete table inet afw", "elements = { 192.168.1.1 }", "elements = { 2001:db8::1 }",
 		"priority -300", "ct state new ip saddr @thr4", "log group 7", "ip saddr @repin4", "ip daddr @repout4",
-		"flags interval,timeout",
+		"flags interval,timeout", "ip saddr @drop4 ct direction original", "tcp dport { 22, 3389 }", "th dport != { 22, 3389 }",
 	} {
 		if !strings.Contains(rs, want) {
 			t.Errorf("ruleset lacks %q", want)
 		}
 	}
 	// Protected subjects are accepted before any drop rule.
-	pre := rs[strings.Index(rs, "chain pre"):]
-	if strings.Index(pre, "@protect4 accept") > strings.Index(pre, "@drop4") {
+	obs := rs[strings.Index(rs, "chain observe"):]
+	if strings.Index(obs, "@protect4 accept") > strings.Index(obs, "@drop4") {
 		t.Error("protected accept must come first")
+	}
+	// Verdict drops must never block what we start.
+	if strings.Contains(rs, "daddr @drop4") || strings.Contains(rs, "daddr @drop6") {
+		t.Error("verdict drops must not match destinations")
 	}
 	shadow := n.Ruleset(nil, true)
 	if strings.Contains(shadow, " drop\n") || !strings.Contains(shadow, "log group 7") {

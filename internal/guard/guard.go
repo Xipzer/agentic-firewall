@@ -28,9 +28,9 @@ type Config struct {
 type Guard struct {
 	mu     sync.Mutex
 	c      Config
-	tokens float64
+	tokens [2]float64 // per budget class: proven, spoofable
 	refill time.Time
-	active map[netip.Prefix]time.Time
+	active map[netip.Prefix]activeEntry
 	// Exhausted counts verdicts refused by the action budget.
 	Exhausted uint64
 }
@@ -39,7 +39,39 @@ func New(c Config) *Guard {
 	if c.MinTTL == 0 {
 		c.MinTTL = 30 * time.Second
 	}
-	return &Guard{c: c, tokens: float64(c.PerMinute), active: map[netip.Prefix]time.Time{}}
+	g := &Guard{c: c, active: map[netip.Prefix]activeEntry{}}
+	g.tokens = [2]float64{g.rate(classProven), g.rate(classSpoof)}
+	return g
+}
+
+type activeEntry struct {
+	until time.Time
+	class int
+}
+
+const (
+	classProven = 0
+	classSpoof  = 1
+)
+
+// Actions justified only by spoofable evidence draw on a separate, smaller
+// budget (half), so fake traffic can never spend the budget that real,
+// proven attacks need.
+func (g *Guard) rate(class int) float64 {
+	if class == classSpoof {
+		return max(1, float64(g.c.PerMinute)/2)
+	}
+	return float64(g.c.PerMinute)
+}
+
+func (g *Guard) activeOf(class int) int {
+	n := 0
+	for _, a := range g.active {
+		if a.class == class {
+			n++
+		}
+	}
+	return n
 }
 
 // Outcome is the verdict after the rails, plus whether the enforcer should act.
@@ -136,31 +168,42 @@ func (g *Guard) Check(v *afp.Verdict, now time.Time) Outcome {
 	if v.Action.Severity() < afp.ActionThrottle.Severity() {
 		return out
 	}
-	for k, until := range g.active {
-		if now.After(until) {
+	for k, a := range g.active {
+		if now.After(a.until) {
 			delete(g.active, k)
 		}
 	}
+	class := classProven
+	if allSpoofable(v.Signals) {
+		class = classSpoof
+	}
 	_, already := g.active[p]
 	if !human && !already {
-		g.tokens = min(float64(g.c.PerMinute), g.tokens+now.Sub(g.refill).Minutes()*float64(g.c.PerMinute))
+		elapsed := now.Sub(g.refill).Minutes()
+		for c := range g.tokens {
+			g.tokens[c] = min(g.rate(c), g.tokens[c]+elapsed*g.rate(c))
+		}
 		g.refill = now
+		maxActive := g.c.MaxActive
+		if class == classSpoof {
+			maxActive = max(1, g.c.MaxActive/2)
+		}
 		switch {
-		case len(g.active) >= g.c.MaxActive:
+		case len(g.active) >= g.c.MaxActive || g.activeOf(class) >= maxActive:
 			out.BudgetExhausted = true
 			g.Exhausted++
 			downgrade(afp.ActionObserve, "max active actions reached")
 			return out
-		case g.tokens < 1:
+		case g.tokens[class] < 1:
 			out.BudgetExhausted = true
 			g.Exhausted++
 			downgrade(afp.ActionObserve, "per-minute action budget exhausted")
 			return out
 		}
-		g.tokens--
+		g.tokens[class]--
 	}
 	ttl, _ := afp.ParseTTL(v.TTL)
-	g.active[p] = now.Add(ttl)
+	g.active[p] = activeEntry{until: now.Add(ttl), class: class}
 	out.Enforce = g.c.Mode == "enforce"
 	return out
 }

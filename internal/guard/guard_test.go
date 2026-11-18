@@ -122,3 +122,22 @@ func TestShadowNeverEnforces(t *testing.T) {
 		t.Fatalf("shadow: %+v", out)
 	}
 }
+
+func TestSpoofableActionsCannotDrainProvenBudget(t *testing.T) {
+	gd := g(4, 100)
+	for i := 0; i < 10; i++ {
+		gd.Check(verdict(afp.TierFast, afp.SubjectHost, "45.9.20."+string(rune('0'+i)), afp.ActionThrottle, "10m", true), now)
+	}
+	for i, ip := range []string{"103.77.1.1", "103.77.1.2", "103.77.1.3", "103.77.1.4"} {
+		if a := gd.Check(verdict(afp.TierFast, afp.SubjectHost, ip, afp.ActionDrop, "10m", false), now).Verdict.Action; a != afp.ActionDrop {
+			t.Fatalf("proven drop %d refused after a spoofed flood: %s", i, a)
+		}
+	}
+	gd2 := g(100, 10)
+	for i := 0; i < 10; i++ {
+		gd2.Check(verdict(afp.TierFast, afp.SubjectHost, "45.9.21."+string(rune('0'+i)), afp.ActionThrottle, "10m", true), now)
+	}
+	if gd2.activeOf(classSpoof) != 5 {
+		t.Fatalf("spoofable actions should be capped at half of max_active, got %d", gd2.activeOf(classSpoof))
+	}
+}
