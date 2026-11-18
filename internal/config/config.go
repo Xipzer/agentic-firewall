@@ -48,6 +48,7 @@ type Config struct {
 	Heuristics     Heuristics
 	Policy         Policy
 	Budget         Budget
+	BreakGlass     BreakGlass `yaml:"breakglass"`
 	Feeds          []Feed
 	Crosstalk      Crosstalk
 	Log            Log
@@ -91,6 +92,22 @@ type Policy struct {
 type Budget struct {
 	PerMinute int `yaml:"per_minute"`
 	MaxActive int `yaml:"max_active"`
+}
+
+// BreakGlass controls the emergency posture: under a flood that hurts the
+// service, known-good sources keep full access and newcomers share a capped lane.
+type BreakGlass struct {
+	Auto          bool     `yaml:"auto"`
+	MinRate       float64  `yaml:"min_rate"`
+	Surge         float64  `yaml:"surge"`
+	AbsRate       float64  `yaml:"abs_rate"`
+	FailRatio     float64  `yaml:"fail_ratio"`
+	Hold          Duration `yaml:"hold"`
+	ManualHold    Duration `yaml:"manual_hold"`
+	NewcomerRate  int      `yaml:"newcomer_rate"`
+	PerSourceRate string   `yaml:"per_source_rate"`
+	Sensitivity   float64  `yaml:"sensitivity"`
+	BudgetFactor  float64  `yaml:"budget_factor"`
 }
 
 type Feed struct {
@@ -165,7 +182,10 @@ func Default() Config {
 			BaseTTL: Duration(10 * time.Minute), MaxTTL: Duration(24 * time.Hour), TTLMultiplier: 4,
 			MinPrefix4: 16, MinPrefix6: 32,
 		},
-		Budget:        Budget{PerMinute: 60, MaxActive: 4096},
+		Budget: Budget{PerMinute: 60, MaxActive: 4096},
+		BreakGlass: BreakGlass{Auto: true, MinRate: 100, Surge: 5, AbsRate: 2000, FailRatio: 0.6,
+			Hold: Duration(10 * time.Minute), ManualHold: Duration(time.Hour), NewcomerRate: 200,
+			PerSourceRate: "2/second", Sensitivity: 2, BudgetFactor: 4},
 		Crosstalk:     Crosstalk{MaxSkew: Duration(2 * time.Minute), MaxTTL: Duration(time.Hour), PerMinute: 120},
 		Log:           Log{Path: "/var/log/afw/afw.jsonl", MaxMB: 50, Keep: 5, Observations: "evidence"},
 		NFT:           NFT{Binary: "nft", Table: "afw", LogGroup: 7, LogRate: 1000, OnExit: "keep"},
@@ -227,6 +247,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Budget.PerMinute <= 0 || c.Budget.MaxActive <= 0 {
 		errs = append(errs, errors.New("budget must be positive"))
+	}
+	if b := c.BreakGlass; b.MinRate <= 0 || b.Surge < 1.5 || b.AbsRate <= b.MinRate || b.FailRatio <= 0 || b.FailRatio > 1 ||
+		b.Hold <= 0 || b.NewcomerRate <= 0 || b.Sensitivity < 1 || b.BudgetFactor < 1 || b.BudgetFactor > 20 {
+		errs = append(errs, errors.New("breakglass: need min_rate > 0, surge >= 1.5, abs_rate > min_rate, 0 < fail_ratio <= 1, hold > 0, newcomer_rate > 0, sensitivity >= 1, 1 <= budget_factor <= 20"))
 	}
 	if c.MaxSubjects < 128 {
 		errs = append(errs, errors.New("max_subjects must be at least 128"))

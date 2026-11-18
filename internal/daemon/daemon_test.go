@@ -68,6 +68,7 @@ func newTestDaemon(t *testing.T, mode string) (*Daemon, *enforce.Memory, *bytes.
 	}
 	d := New(cfg, quiet)
 	d.discover = func() config.Discovered { return config.Discovered{} }
+	d.TableFill = func() float64 { return 0 }
 	mem := enforce.NewMemory(nil)
 	var buf bytes.Buffer
 	d.Enforcer, d.Journal = mem, journal.NewWriter(&buf)

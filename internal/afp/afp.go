@@ -173,6 +173,10 @@ type Verdict struct {
 	Mode       string         `json:"mode,omitempty"`
 	Signals    []Signal       `json:"signals,omitempty"`
 	Refs       []string       `json:"refs,omitempty"`
+	// Class names the attack using the dotted taxonomy (e.g. "recon.scan.vertical").
+	Class string `json:"class,omitempty"`
+	// Posture is the node's defence posture when the verdict was made.
+	Posture string `json:"posture,omitempty"`
 	// Hops counts how many nodes relayed this verdict. Peers never relay a
 	// verdict whose Hops is already non-zero, which bounds crosstalk loops.
 	Hops int `json:"hops,omitempty"`
@@ -186,6 +190,7 @@ type Escalation struct {
 	Priority string         `json:"priority"`
 	Deadline string         `json:"deadline,omitempty"`
 	Target   Tier           `json:"target,omitempty"`
+	Class    string         `json:"class,omitempty"`
 	Context  map[string]any `json:"context,omitempty"`
 }
 

@@ -58,6 +58,7 @@ func Replay(cfg config.Config, r io.Reader, w io.Writer, log *slog.Logger, local
 	d := New(cfg, log)
 	d.Now = func() time.Time { return clock }
 	d.discover = func() config.Discovered { return local }
+	d.TableFill = func() float64 { return 0 }
 	mem := enforce.NewMemory(d.Now)
 	d.Enforcer, d.Journal = mem, journal.NewWriter(w)
 	d.Feeds = nil

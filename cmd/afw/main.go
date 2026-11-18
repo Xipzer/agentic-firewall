@@ -36,6 +36,7 @@ Usage:
   afw confirm  [-c config.yaml]           keep enforcing after the probation window
   afw mode     shadow|enforce [-c ...]    switch mode live
   afw unblock  <ip|cidr> [-grace 1h]      lift an action and hold the subject in grace
+  afw breakglass on|off [-c ...]          emergency lane: trusted first, newcomers capped
   afw panic    [-c config.yaml]           remove every afw rule from the kernel now
   afw replay   <observations.jsonl> [-c]  run recorded traffic through the fast tier offline
   afw validate <file.json|jsonl>...       check AFP messages against the v0.1 rules
@@ -68,6 +69,10 @@ func main() {
 	case "unblock":
 		err = need(positional, 1, func() error {
 			return control(*cfgPath, http.MethodPost, "/unblock", url.Values{"subject": {positional[0]}, "grace": {grace.String()}})
+		})
+	case "breakglass":
+		err = need(positional, 1, func() error {
+			return control(*cfgPath, http.MethodPost, "/breakglass", url.Values{"state": {positional[0]}})
 		})
 	case "panic":
 		err = panicCmd(*cfgPath)

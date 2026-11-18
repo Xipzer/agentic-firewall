@@ -2,16 +2,55 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentic-firewall.dev/afp/0.1/escalation.schema.json",
   "title": "AFP 0.1 escalation: a request for a higher tier to look",
-  "allOf": [{ "$ref": "common.schema.json#/$defs/envelope" }],
-  "required": ["subject", "refs", "question", "priority"],
+  "allOf": [
+    {
+      "$ref": "common.schema.json#/$defs/envelope"
+    }
+  ],
+  "required": [
+    "subject",
+    "refs",
+    "question",
+    "priority"
+  ],
   "properties": {
-    "type": { "const": "escalation" },
-    "subject": { "$ref": "common.schema.json#/$defs/subject" },
-    "refs": { "$ref": "common.schema.json#/$defs/refs", "minItems": 1 },
-    "question": { "type": "string", "minLength": 1 },
-    "priority": { "enum": ["low", "normal", "high", "critical"] },
-    "deadline": { "$ref": "common.schema.json#/$defs/ttl" },
-    "target": { "enum": ["medium", "slow", "human"] },
-    "context": { "type": "object" }
+    "type": {
+      "const": "escalation"
+    },
+    "subject": {
+      "$ref": "common.schema.json#/$defs/subject"
+    },
+    "refs": {
+      "$ref": "common.schema.json#/$defs/refs",
+      "minItems": 1
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "priority": {
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "critical"
+      ]
+    },
+    "deadline": {
+      "$ref": "common.schema.json#/$defs/ttl"
+    },
+    "target": {
+      "enum": [
+        "medium",
+        "slow",
+        "human"
+      ]
+    },
+    "context": {
+      "type": "object"
+    },
+    "class": {
+      "$ref": "common.schema.json#/$defs/class"
+    }
   }
 }

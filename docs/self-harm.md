@@ -51,6 +51,15 @@ Now the same drop only stops that address from opening connections to us. The at
 | Groom trust, then attack | Trust takes sessions on two days and only protects against forged evidence; proven abuse still drops |
 | Spoof a LAN device's address to get it "quarantined" | Internal devices are capped at observe in v0.1. Quarantine (v0.2) must require link-layer identity (MAC, switch port) and proven evidence, never IP alone |
 
+## Break-glass is bounded too
+
+Break-glass lets afw act harder in an emergency (see [attack-universe.md](attack-universe.md)). It is built so the emergency itself cannot be turned against us:
+
+- It is triggered by **harm to the service**, which an attacker can only produce by actually attacking, never by a single signal that is cheap to fake.
+- It **prioritises the known good** rather than blocking more of the unknown: trusted, protected and LAN sources are never limited.
+- It raises *how hard* afw acts (thresholds, budget) but never *what it may act on*. Rules 1, 2, 3, 7 and 10 still hold.
+- If an attacker holds break-glass on, the cost to us is that unknown newcomers share a capped lane, which is the right trade during a flood, and a human is told at once.
+
 ## Rules for the tiers still to come
 
 These bind v0.2 and v0.3 before they are written:

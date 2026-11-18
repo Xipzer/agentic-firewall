@@ -88,12 +88,22 @@ table inet {{.T}} {
 	set drop6 { type ipv6_addr; flags interval,timeout; }
 	set thr4 { type ipv4_addr; flags interval,timeout; }
 	set thr6 { type ipv6_addr; flags interval,timeout; }
+	set trusted4 { type ipv4_addr; flags interval; }
+	set trusted6 { type ipv6_addr; flags interval; }
+	set bgm4 { type ipv4_addr; size 65535; flags dynamic,timeout; timeout 1m; }
+	set bgm6 { type ipv6_addr; size 65535; flags dynamic,timeout; timeout 1m; }
 	set thrm4 { type ipv4_addr; size 65535; flags dynamic,timeout; timeout 1m; }
 	set thrm6 { type ipv6_addr; size 65535; flags dynamic,timeout; timeout 1m; }
 	counter drop_verdict {}
 	counter drop_reputation {}
 	counter drop_egress {}
 	counter throttled {}
+	counter breakglass {}
+
+	# Empty unless break-glass is on. Called before conntrack for TCP SYNs,
+	# so shed connection attempts never take a slot in the connection table.
+	chain breakglass {
+	}
 
 	# Before conntrack: reputation drops (curated lists of hijacked or
 	# criminal networks) so floods from them never create connection state.
@@ -102,6 +112,7 @@ table inet {{.T}} {
 		ip saddr @protect4 accept
 		ip6 saddr @protect6 accept
 {{- if not .ObserveOnly}}
+		tcp flags & (fin | syn | rst | ack) == syn jump breakglass
 		ip saddr @repin4 counter name drop_reputation drop
 		ip6 saddr @repin6 counter name drop_reputation drop
 		ip daddr @protect4 accept
@@ -386,6 +397,53 @@ func (n *NFT) ReplaceReputation(ctx context.Context, r Reputation) error {
 
 func (n *NFT) SetProtected(ctx context.Context, ps []netip.Prefix) error {
 	return n.replaceSets(ctx, "protect", ps)
+}
+
+func (n *NFT) SetTrusted(ctx context.Context, ps []netip.Prefix) error {
+	return n.replaceSets(ctx, "trusted", ps)
+}
+
+// BreakGlassScript renders the emergency lane. Exported for tests and `afw ruleset`.
+func (n *NFT) BreakGlassScript(spec *BreakGlassSpec) string {
+	var b strings.Builder
+	t := n.Table
+	fmt.Fprintf(&b, "flush chain inet %s breakglass\n", t)
+	if spec == nil {
+		return b.String()
+	}
+	rule := func(r string) { fmt.Fprintf(&b, "add rule inet %s breakglass %s\n", t, r) }
+	rule("ip saddr @protect4 return")
+	rule("ip6 saddr @protect6 return")
+	rule("ip saddr @trusted4 return")
+	rule("ip6 saddr @trusted6 return")
+	v4, v6 := split(spec.Internal)
+	if len(v4) > 0 {
+		rule("ip saddr { " + joinElems(v4) + " } return")
+	}
+	if len(v6) > 0 {
+		rule("ip6 saddr { " + joinElems(v6) + " } return")
+	}
+	per := spec.PerSource
+	if per == "" {
+		per = "2/second"
+	}
+	rule(fmt.Sprintf("meta nfproto ipv4 add @bgm4 { ip saddr limit rate over %s } counter name breakglass drop", per))
+	rule(fmt.Sprintf("meta nfproto ipv6 add @bgm6 { ip6 saddr limit rate over %s } counter name breakglass drop", per))
+	rule(fmt.Sprintf("limit rate over %d/second burst %d packets counter name breakglass drop", spec.NewcomerRate, spec.NewcomerRate))
+	return b.String()
+}
+
+func joinElems(ps []netip.Prefix) string {
+	ss := make([]string, len(ps))
+	for i, p := range ps {
+		ss[i] = elem(p)
+	}
+	return strings.Join(ss, ", ")
+}
+
+func (n *NFT) BreakGlass(ctx context.Context, spec *BreakGlassSpec) error {
+	_, err := n.Run(ctx, n.BreakGlassScript(spec))
+	return err
 }
 
 func (n *NFT) Flush(ctx context.Context) error {

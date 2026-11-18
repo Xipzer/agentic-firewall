@@ -71,6 +71,25 @@ budget:
   per_minute: 60          # new throttles/drops per minute, all sources
   max_active: 4096
 
+# Break-glass: the emergency posture for floods that harm the service.
+# Trusted sources (earned over 2+ days), protected hosts and the LAN keep full
+# access; everyone else is limited per source and shares one capped lane,
+# enforced before connection tracking. Triggers on harm (surge plus failing
+# handshakes, an exhausted budget or a 70% full connection table), never on
+# one cheap signal. `afw breakglass on|off` overrides.
+breakglass:
+  auto: true
+  min_rate: 100           # new inbound flows/s that can count as a surge
+  surge: 5                # x the learned baseline
+  abs_rate: 2000          # always break glass above this
+  fail_ratio: 0.6
+  hold: 10m               # minimum time in break-glass
+  manual_hold: 1h
+  newcomer_rate: 200      # new connections/s shared by all untrusted sources
+  per_source_rate: 2/second
+  sensitivity: 2          # thresholds halve while it is on
+  budget_factor: 4        # action budget x4; every other rail unchanged
+
 # Reputation feeds. Chosen and rated in docs/alpha-sources.md (18 Nov 2026).
 # Every entry is sanitised: private, reserved, protected and over-wide ranges
 # are removed, and a refresh that changes over max_change of a list is refused.

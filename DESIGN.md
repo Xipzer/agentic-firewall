@@ -58,6 +58,10 @@ A SYN or a UDP packet can carry any source address. Evidence built only from the
 
 An attacker partly controls what an active defence sees, so the design guarantees that the worst they can make it do costs less than what it stops. The key rule is **harm direction**: a verdict built from what a subject sent us only limits what that subject can start, and never touches connections we start. Forgeable evidence can only throttle, proven history earns immunity from forged evidence, and only proven evidence lengthens punishment. The full rule set, including binding rules for the LLM tier, is in [docs/self-harm.md](docs/self-harm.md).
 
+### Break-glass and coverage
+
+When a flood harms the service and there is nobody specific to block, afw breaks glass: trusted users, protected hosts and the LAN keep full access, everyone else shares a capped lane enforced before connection tracking, and connection-table slots held by half-open attackers are reclaimed. Every verdict and escalation is classified (`class`, e.g. `access.bruteforce`), and [docs/attack-universe.md](docs/attack-universe.md) maps the whole attack universe to what afw can see, name and stop, with the gaps listed.
+
 ## Protocol (AFP, Agentic Firewall Protocol)
 
 Transport-agnostic messages, JSON for the reference implementation, protobuf later. Every message has `afp` (version), `id`, `ts` and `source` (tier + agent id, optional `node`).

@@ -22,12 +22,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Xipzer/agentic-firewall/internal/afp"
 	"github.com/Xipzer/agentic-firewall/internal/config"
 	"github.com/Xipzer/agentic-firewall/internal/enforce"
+	"github.com/Xipzer/agentic-firewall/internal/fast"
 	"github.com/Xipzer/agentic-firewall/internal/sensor"
 )
 
@@ -378,4 +380,115 @@ func TestLabLargeReputationLoad(t *testing.T) {
 	if err := n.ReplaceReputation(ctx, enforce.Reputation{DropIn: drop, DropOut: drop, ThrottleIn: thr}); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
+}
+
+// Under a flood from rotating sources there is nobody to block. Break-glass
+// must keep trusted users and protected hosts fully served while the flood
+// shares a small capped lane.
+func TestLabBreakGlassKeepsTrustedUsersServed(t *testing.T) {
+	nft := labSetup(t)
+	if out, err := exec.Command("ip", "addr", "add", "45.10.0.0/16", "dev", "lo").CombinedOutput(); err != nil && !strings.Contains(string(out), "already") && !strings.Contains(string(out), "File exists") {
+		t.Fatalf("%v %s", err, out)
+	}
+	listen(t, target+":22")
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Node, cfg.Mode, cfg.Probation = "lab", "enforce", 0
+	f := false
+	cfg.AutoProtect = &f
+	cfg.Protected = []string{protected}
+	cfg.StateDir, cfg.ControlSocket, cfg.Log.Path = dir, filepath.Join(dir, "s"), filepath.Join(dir, "afw.jsonl")
+	cfg.NFT.Binary, cfg.NFT.OnExit = nft, "teardown"
+	cfg.BreakGlass.MinRate, cfg.BreakGlass.AbsRate, cfg.BreakGlass.Surge = 20, 3000, 3
+	cfg.BreakGlass.NewcomerRate, cfg.BreakGlass.PerSourceRate = 20, "1/second"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// A wrong trust file must not stop the daemon.
+	_ = os.WriteFile(filepath.Join(dir, "trust.json"), []byte("{not json"), 0o600)
+	d := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.discover = func() config.Discovered {
+		return config.Discovered{Self: []netip.Prefix{netip.MustParsePrefix(target + "/32")}}
+	}
+	if err := d.Init(); err != nil {
+		t.Fatal(err)
+	}
+	day := time.Now().Unix()/86400 - 1
+	d.Engine.LoadTrust(map[string]fast.TrustRecord{bystander + "/32": {Sessions: 9, Days: 4, LastDay: day, LastSeen: time.Now()}})
+	ctx, cancel := context.WithCancel(context.Background())
+	var c sensor.Counters
+	go func() { _ = sensor.RunNFLOG(ctx, cfg.NFT.LogGroup, d.Events, &c) }()
+	go func() { _ = sensor.RunConntrack(ctx, d.Events, &c) }()
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	time.Sleep(300 * time.Millisecond)
+
+	stop := make(chan struct{})
+	var floodTried, floodOK atomic.Int64
+	for w := 0; w < 16; w++ {
+		go func(w int) {
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				src := fmt.Sprintf("45.10.%d.%d", (w*37+i/250)%250+1, i%250+1)
+				floodTried.Add(1)
+				if dial(src, target+":9", 150*time.Millisecond) == nil {
+					floodOK.Add(1)
+				}
+				_ = dial(src, target+":22", 150*time.Millisecond)
+			}
+		}(w)
+	}
+	defer close(stop)
+	eventually(t, "break-glass", 15*time.Second, func() bool {
+		var lvl string
+		d.do(func() { lvl = d.Posture.Level().String() })
+		return lvl == "breakglass"
+	})
+	eventually(t, "break-glass lane in the kernel", 5*time.Second, func() bool {
+		out, _ := exec.Command(nft, "list", "chain", "inet", "afw", "breakglass").CombinedOutput()
+		return strings.Contains(string(out), "@trusted4") && strings.Contains(string(out), "limit rate over 20/second")
+	})
+	if s := nftList(t, nft, "trusted4"); !strings.Contains(s, bystander) {
+		t.Fatalf("trusted user not in the priority lane:\n%s", s)
+	}
+	ok := 0
+	for i := 0; i < 10; i++ {
+		if err := dial(bystander, target+":22", time.Second); err == nil {
+			ok++
+		} else {
+			t.Logf("trusted dial: %v", err)
+		}
+	}
+	if ok != 10 {
+		cnt, _ := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_count")
+		t.Logf("conntrack entries %s flood tried %d ok %d", cnt, floodTried.Load(), floodOK.Load())
+		t.Fatalf("trusted user served %d/10 during the flood", ok)
+	}
+	if err := dial(protected, target+":22", time.Second); err != nil {
+		t.Fatalf("protected host refused during break-glass: %v", err)
+	}
+	// Our own outbound is never in the lane.
+	listen(t, "45.10.200.200:8443")
+	if err := dial(target, "45.10.200.200:8443", time.Second); err != nil {
+		t.Fatalf("outbound broken during break-glass: %v", err)
+	}
+	d.Journal.Flush()
+	if !l2has(t, cfg.Log.Path, `"class":"dos.flood"`) {
+		t.Fatal("break-glass escalation not journalled")
+	}
+	t.Logf("flood connections that got through: %d of %d", floodOK.Load(), floodTried.Load())
+
+	if lvl := d.SetBreakGlass(context.Background(), false); lvl == "breakglass" {
+		t.Logf("auto mode re-armed break-glass while the flood continues (expected): %s", lvl)
+	}
+}
+
+func l2has(t *testing.T, path, needle string) bool {
+	b, _ := os.ReadFile(path)
+	return strings.Contains(string(b), needle)
 }

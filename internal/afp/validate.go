@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strings"
 )
 
@@ -89,14 +90,29 @@ func (v *Verdict) Validate() error {
 	if v.Mode != "" && v.Mode != "enforce" && v.Mode != "shadow" {
 		errs = append(errs, fmt.Errorf("bad mode %q", v.Mode))
 	}
+	if v.Class != "" && !validClass(v.Class) {
+		errs = append(errs, fmt.Errorf("bad class %q", v.Class))
+	}
+	switch v.Posture {
+	case "", "normal", "elevated", "breakglass":
+	default:
+		errs = append(errs, fmt.Errorf("bad posture %q", v.Posture))
+	}
 	if v.Hops < 0 {
 		errs = append(errs, errors.New("negative hops"))
 	}
 	return errors.Join(errs...)
 }
 
+var classRe = regexp.MustCompile(`^[a-z0-9-]+(\.[a-z0-9-]+)*$`)
+
+func validClass(s string) bool { return classRe.MatchString(s) }
+
 func (e *Escalation) Validate() error {
 	errs := []error{e.Envelope.validate(TypeEscalation), e.Subject.validate()}
+	if e.Class != "" && !validClass(e.Class) {
+		errs = append(errs, fmt.Errorf("bad class %q", e.Class))
+	}
 	if len(e.Refs) == 0 {
 		errs = append(errs, errors.New("escalation needs refs"))
 	}

@@ -23,6 +23,15 @@ type Reputation struct {
 	DropIn, DropOut, ThrottleIn []netip.Prefix
 }
 
+// BreakGlassSpec describes the emergency lane. Protected, trusted and
+// internal sources pass untouched; every other source may open at most
+// PerSource new connections, and all of them together share NewcomerRate.
+type BreakGlassSpec struct {
+	Internal     []netip.Prefix
+	PerSource    string
+	NewcomerRate int
+}
+
 type Enforcer interface {
 	// Setup installs the ruleset idempotently, keeping live timed entries.
 	Setup(ctx context.Context, protected []netip.Prefix, observeOnly bool) error
@@ -30,6 +39,10 @@ type Enforcer interface {
 	Remove(ctx context.Context, prefixes []netip.Prefix) error
 	ReplaceReputation(ctx context.Context, r Reputation) error
 	SetProtected(ctx context.Context, protected []netip.Prefix) error
+	// SetTrusted replaces the earned-trust set (the break-glass priority lane).
+	SetTrusted(ctx context.Context, trusted []netip.Prefix) error
+	// BreakGlass turns the emergency lane on (spec != nil) or off (nil).
+	BreakGlass(ctx context.Context, spec *BreakGlassSpec) error
 	// Flush removes every verdict and reputation entry but keeps observing.
 	Flush(ctx context.Context) error
 	Teardown(ctx context.Context) error
@@ -46,6 +59,22 @@ type Memory struct {
 	Protected  []netip.Prefix
 	Installed  bool
 	Calls      int
+	Trusted    []netip.Prefix
+	Glass      *BreakGlassSpec
+}
+
+func (m *Memory) SetTrusted(_ context.Context, ps []netip.Prefix) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Trusted = ps
+	return nil
+}
+
+func (m *Memory) BreakGlass(_ context.Context, spec *BreakGlassSpec) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Glass = spec
+	return nil
 }
 
 func NewMemory(now func() time.Time) *Memory {

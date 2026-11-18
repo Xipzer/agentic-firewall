@@ -55,9 +55,11 @@ type Decision struct {
 	Offences      int
 	// Incumbent subjects have a proven history of legitimate sessions with us.
 	Incumbent bool
+	// Class names the attack in the taxonomy of docs/attack-universe.md.
+	Class     string
 	Reason    string
-	Evidence      []Event
-	Direction     Direction
+	Evidence  []Event
+	Direction Direction
 }
 
 type flowRec struct {
@@ -122,9 +124,12 @@ type Engine struct {
 	grace    map[netip.Prefix]time.Time
 	ended    map[flowKey]time.Time
 	trust    map[netip.Prefix]*TrustRecord
-	sens     map[uint16]bool
-	svc      map[uint16]bool
-	Stats    Stats
+	// network-wide inbound pressure, read by the posture controller
+	gNew, gAttempts, gFails counter
+	sensitivity             float64
+	sens                    map[uint16]bool
+	svc                     map[uint16]bool
+	Stats                   Stats
 }
 
 type Stats struct {
@@ -143,6 +148,8 @@ func New(p Params) *Engine {
 	for _, port := range p.SensitivePorts {
 		e.sens[port] = true
 	}
+	e.gNew, e.gAttempts, e.gFails = newCounter(p.H.Window.D()), newCounter(failWindow), newCounter(failWindow)
+	e.sensitivity = 1
 	for _, port := range p.ServicePorts {
 		e.svc[port] = true
 	}
@@ -234,6 +241,12 @@ func (e *Engine) onNew(ev Event, key flowKey, src, dst netip.Addr, dir Direction
 	now := ev.Time
 	s, a := e.subjectsFor(src, dir, internal, now)
 	port := ev.Dst.Port()
+	if dir == DirInbound {
+		e.gNew.add(now, 1)
+		if ev.Proto == ProtoTCP {
+			e.gAttempts.add(now, 1)
+		}
+	}
 	weight := uint32(10)
 	if e.svc[port] && dir == DirInbound {
 		weight = 1 // published services see legitimate bursts; count them at a tenth
@@ -318,6 +331,11 @@ func (e *Engine) onEnd(ev Event, key flowKey, src, dst netip.Addr, dir Direction
 		// A failed attempt the NFLOG sampler missed (rate limit or burst).
 		// Conntrack still saw it, so count the attempt, the port and the failure.
 		s, a := e.subjectsFor(src, dir, internal, ev.Time)
+		if dir == DirInbound {
+			e.gNew.add(ev.Time, 1)
+			e.gAttempts.add(ev.Time, 1)
+			e.gFails.add(ev.Time, 1)
+		}
 		for _, x := range []*subject{s, a} {
 			if x == nil {
 				continue
@@ -342,6 +360,9 @@ func (e *Engine) onEnd(ev Event, key flowKey, src, dst netip.Addr, dir Direction
 		switch {
 		case !rec.established && !rec.failed:
 			x.fails.add(ev.Time, 1)
+			if k == rec.agg && k.IsValid() {
+				e.gFails.add(ev.Time, 1)
+			}
 		case rec.established && ev.Time.Sub(rec.start) < e.p.H.ShortSession.D():
 			n := uint32(1)
 			if rec.sensitive {
@@ -520,6 +541,9 @@ func (e *Engine) sweep(now time.Time) {
 			continue
 		}
 		rec.failed = true
+		if rec.agg.IsValid() { // only external subjects have an aggregate
+			e.gFails.add(now, 1)
+		}
 		for _, k := range []netip.Prefix{rec.subj, rec.agg} {
 			if x, ok := e.subjects[k]; ok {
 				x.fails.add(now, 1)
@@ -571,9 +595,9 @@ func combine(sigs []afp.Signal, nonSpoofOnly bool) float64 {
 
 func (e *Engine) signals(s *subject, now time.Time) []afp.Signal {
 	h := e.p.H
-	f := 1.0
+	f := 1.0 / e.sensitivity
 	if s.agg {
-		f = h.AggregateFactor
+		f *= h.AggregateFactor
 		if s.sources.count(now.Add(-h.LongWindow.D())) < 3 {
 			return nil // one busy host is already handled at host level
 		}
@@ -706,8 +730,64 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 		Signals: sigs, Internal: s.internal, Aggregate: s.agg, SpoofLimited: spoofLimited, PeerDerived: peerDerived,
 		Offences: offences, Evidence: slices.Clone(s.evidence), Direction: s.dir, Incumbent: incumbent}
 	d.Escalate = !s.benign && (spoofLimited || s.internal || s.agg || incumbent || (act != afp.ActionObserve && score < 0.9))
+	d.Class = Classify(d)
 	d.Reason = reason(d)
 	return d, true
+}
+
+// Classify names the attack from its strongest evidence, so that even what
+// afw cannot stop is identified (see docs/attack-universe.md).
+func Classify(d Decision) string {
+	has := map[string]float64{}
+	top := ""
+	for _, s := range d.Signals {
+		name := s.Name
+		if strings.HasPrefix(name, "peer:") {
+			name = "peer"
+		}
+		if _, ok := has[name]; !ok {
+			has[name] = s.Weight
+		}
+		if top == "" {
+			top = name
+		}
+	}
+	var c string
+	switch top {
+	case "short_sessions":
+		c = "access.bruteforce"
+	case "established_rate":
+		c = "dos.connection-flood"
+	case "conn_rate", "handshake_fail":
+		switch {
+		case has["port_fanout"] > 0 || has["slow_scan"] > 0:
+			c = "recon.scan.vertical"
+		case has["host_fanout"] > 0:
+			c = "recon.scan.horizontal"
+		default:
+			c = "dos.syn-flood"
+		}
+	case "port_fanout":
+		c = "recon.scan.vertical"
+	case "slow_scan":
+		c = "recon.scan.slow"
+	case "host_fanout":
+		c = "recon.scan.horizontal"
+	case "reputation":
+		c = "infra.known-bad"
+	case "peer":
+		c = "peer.reported"
+	default:
+		c = "unknown"
+	}
+	if d.Internal {
+		// An inside device doing any of this is a compromise symptom.
+		c = "lateral." + strings.TrimPrefix(c, "recon.")
+	}
+	if d.Aggregate {
+		c += ".distributed"
+	}
+	return c
 }
 
 func (e *Engine) ttl(offences int) time.Duration {
@@ -735,6 +815,50 @@ func reason(d Decision) string {
 		r += " (source has a history of legitimate sessions: judged on proven evidence only; may be a shared address)"
 	}
 	return r
+}
+
+// Pressure is the network-wide inbound load the posture controller watches.
+type Pressure struct {
+	NewPerSec  float64 // new inbound flows per second, short window
+	Attempts   uint32  // inbound TCP attempts, last minute
+	FailRatio  float64 // share of those that never completed
+	Incumbents int
+	// Filled by the daemon from the kernel.
+	ConntrackFill float64 // share of the connection table in use
+	ShedPerSec    float64 // connection attempts the break-glass lane turned away
+}
+
+func (e *Engine) Pressure(now time.Time) Pressure {
+	p := Pressure{NewPerSec: float64(e.gNew.sum(now)) / e.p.H.Window.D().Seconds(), Attempts: e.gAttempts.sum(now)}
+	if p.Attempts > 0 {
+		p.FailRatio = math.Min(1, float64(e.gFails.sum(now))/float64(p.Attempts))
+	}
+	for k := range e.trust {
+		if e.Incumbent(k, now) {
+			p.Incumbents++
+		}
+	}
+	return p
+}
+
+// SetSensitivity scales every threshold down by f (f > 1 is more sensitive).
+// Break-glass raises it; earned trust still shields incumbents from forged evidence.
+func (e *Engine) SetSensitivity(f float64) {
+	if f < 1 {
+		f = 1
+	}
+	e.sensitivity = f
+}
+
+// Trusted lists incumbents, for the kernel's priority lane.
+func (e *Engine) Trusted(now time.Time) []netip.Prefix {
+	var out []netip.Prefix
+	for k := range e.trust {
+		if e.Incumbent(k, now) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // Active reports the number of subjects with a live action.

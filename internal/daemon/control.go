@@ -13,6 +13,7 @@ import (
 
 	"github.com/Xipzer/agentic-firewall/internal/afp"
 	"github.com/Xipzer/agentic-firewall/internal/netx"
+	"github.com/Xipzer/agentic-firewall/internal/posture"
 )
 
 // Status is what `afw status` prints.
@@ -20,6 +21,7 @@ type Status struct {
 	Node         string                       `json:"node"`
 	Role         string                       `json:"role"`
 	Mode         string                       `json:"mode"`
+	Posture      map[string]any               `json:"posture"`
 	Uptime       string                       `json:"uptime"`
 	Probation    string                       `json:"probation,omitempty"`
 	Protected    []string                     `json:"protected"`
@@ -49,7 +51,14 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		s.Probation = "disarms at " + d.probation.Format(time.RFC3339) + " unless `afw confirm` is run"
 	}
 	d.mu.Unlock()
-	d.do(func() { s.Engine = map[string]any{"stats": d.Engine.Stats, "active": d.Engine.Active()} })
+	d.do(func() {
+		s.Engine = map[string]any{"stats": d.Engine.Stats, "active": d.Engine.Active(), "pressure": d.Engine.Pressure(d.Now())}
+		s.Posture = map[string]any{"level": d.Posture.Level().String(), "since": d.Posture.Since(), "reasons": d.Posture.Reasons,
+			"baseline_per_sec": d.Posture.Baseline()}
+		if d.Posture.Level() == posture.BreakGlass {
+			s.Posture["holds_until"] = d.Posture.Until()
+		}
+	})
 	if st, err := d.Enforcer.Stats(ctx); err != nil {
 		s.EnforcerErr = err.Error()
 	} else {
@@ -117,6 +126,20 @@ func (d *Daemon) SetMode(ctx context.Context, mode string) error {
 	return err
 }
 
+// SetBreakGlass is the operator's manual switch. "on" lasts manual_hold and
+// can be renewed; "off" steps down at once (auto mode can re-trigger it if
+// the harm is still there).
+func (d *Daemon) SetBreakGlass(ctx context.Context, on bool) string {
+	var lvl string
+	d.do(func() {
+		now := d.Now()
+		d.Posture.Manual(on, now)
+		d.updatePosture(ctx, now)
+		lvl = d.Posture.Level().String()
+	})
+	return lvl
+}
+
 // Panic removes the whole table. Nothing afw installed stays in the kernel.
 func (d *Daemon) Panic(ctx context.Context) error {
 	d.mu.Lock()
@@ -153,6 +176,14 @@ func (d *Daemon) ServeControl(ctx context.Context, path string, onPanic func()) 
 	mux.HandleFunc("POST /mode", func(w http.ResponseWriter, r *http.Request) {
 		err := d.SetMode(r.Context(), r.URL.Query().Get("m"))
 		reply(w, map[string]string{"mode": d.Guard.Mode()}, err)
+	})
+	mux.HandleFunc("POST /breakglass", func(w http.ResponseWriter, r *http.Request) {
+		st := r.URL.Query().Get("state")
+		if st != "on" && st != "off" {
+			reply(w, nil, errors.New("state must be on or off"))
+			return
+		}
+		reply(w, map[string]string{"posture": d.SetBreakGlass(r.Context(), st == "on")}, nil)
 	})
 	mux.HandleFunc("POST /unblock", func(w http.ResponseWriter, r *http.Request) {
 		grace := time.Hour

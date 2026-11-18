@@ -33,13 +33,25 @@ type Guard struct {
 	active map[netip.Prefix]activeEntry
 	// Exhausted counts verdicts refused by the action budget.
 	Exhausted uint64
+	factor    float64
 }
+
+// SetBudgetFactor scales the action budget (break-glass raises it). Every
+// other rail is unchanged: protected subjects, prefix limits, TTL caps and
+// the spoofable/proven split still hold.
+func (g *Guard) SetBudgetFactor(f float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.factor = max(1, f)
+}
+
+func (g *Guard) ExhaustedCount() uint64 { g.mu.Lock(); defer g.mu.Unlock(); return g.Exhausted }
 
 func New(c Config) *Guard {
 	if c.MinTTL == 0 {
 		c.MinTTL = 30 * time.Second
 	}
-	g := &Guard{c: c, active: map[netip.Prefix]activeEntry{}}
+	g := &Guard{c: c, active: map[netip.Prefix]activeEntry{}, factor: 1}
 	g.tokens = [2]float64{g.rate(classProven), g.rate(classSpoof)}
 	return g
 }
@@ -58,10 +70,11 @@ const (
 // budget (half), so fake traffic can never spend the budget that real,
 // proven attacks need.
 func (g *Guard) rate(class int) float64 {
+	f := max(1, g.factor)
 	if class == classSpoof {
-		return max(1, float64(g.c.PerMinute)/2)
+		return max(1, f*float64(g.c.PerMinute)/2)
 	}
-	return float64(g.c.PerMinute)
+	return f * float64(g.c.PerMinute)
 }
 
 func (g *Guard) activeOf(class int) int {
@@ -184,12 +197,13 @@ func (g *Guard) Check(v *afp.Verdict, now time.Time) Outcome {
 			g.tokens[c] = min(g.rate(c), g.tokens[c]+elapsed*g.rate(c))
 		}
 		g.refill = now
-		maxActive := g.c.MaxActive
+		total := int(float64(g.c.MaxActive) * max(1, g.factor))
+		maxActive := total
 		if class == classSpoof {
-			maxActive = max(1, g.c.MaxActive/2)
+			maxActive = max(1, total/2)
 		}
 		switch {
-		case len(g.active) >= g.c.MaxActive || g.activeOf(class) >= maxActive:
+		case len(g.active) >= total || g.activeOf(class) >= maxActive:
 			out.BudgetExhausted = true
 			g.Exhausted++
 			downgrade(afp.ActionObserve, "max active actions reached")

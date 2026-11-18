@@ -22,7 +22,7 @@ func subjectOf(d fast.Decision) afp.Subject {
 // observations behind it so the journal can be replayed.
 func verdictFrom(d fast.Decision, src afp.Source, throttleRate string) (*afp.Verdict, []*afp.Observation) {
 	v := &afp.Verdict{Envelope: afp.NewEnvelope(afp.TypeVerdict, src), Subject: subjectOf(d), Action: d.Action,
-		Confidence: d.Score, TTL: afp.FormatTTL(d.TTL), Reason: d.Reason, Escalate: d.Escalate, Signals: d.Signals}
+		Confidence: d.Score, TTL: afp.FormatTTL(d.TTL), Reason: d.Reason, Escalate: d.Escalate, Signals: d.Signals, Class: d.Class}
 	switch d.Action {
 	case afp.ActionThrottle:
 		v.Params = map[string]any{"rate": throttleRate, "scope": "new connections the subject starts"}
@@ -83,7 +83,7 @@ func spoofNote(s afp.Signal) string {
 
 func escalation(v *afp.Verdict, d *fast.Decision, out guard.Outcome) *afp.Escalation {
 	e := &afp.Escalation{Envelope: afp.NewEnvelope(afp.TypeEscalation, v.Source), Subject: v.Subject,
-		Refs: append([]string{v.ID}, v.Refs...), Priority: "normal", Target: afp.TierMedium, Deadline: v.TTL}
+		Refs: append([]string{v.ID}, v.Refs...), Priority: "normal", Target: afp.TierMedium, Deadline: v.TTL, Class: v.Class}
 	switch {
 	case out.BudgetExhausted:
 		e.Priority, e.Target = "critical", afp.TierHuman

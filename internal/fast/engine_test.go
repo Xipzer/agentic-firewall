@@ -344,3 +344,21 @@ func TestSpoofedEvidenceNeverLengthensPunishment(t *testing.T) {
 		}
 	}
 }
+
+func TestClassification(t *testing.T) {
+	cases := map[string]Decision{
+		"access.bruteforce":               {Signals: []afp.Signal{{Name: "short_sessions", Weight: 0.9}}},
+		"recon.scan.vertical":             {Signals: []afp.Signal{{Name: "conn_rate", Weight: 0.8}, {Name: "port_fanout", Weight: 0.7}}},
+		"dos.syn-flood":                   {Signals: []afp.Signal{{Name: "handshake_fail", Weight: 0.8}, {Name: "conn_rate", Weight: 0.7}}},
+		"recon.scan.slow":                 {Signals: []afp.Signal{{Name: "slow_scan", Weight: 0.6}}},
+		"lateral.scan.horizontal":         {Signals: []afp.Signal{{Name: "host_fanout", Weight: 0.6}}, Internal: true},
+		"recon.scan.vertical.distributed": {Signals: []afp.Signal{{Name: "port_fanout", Weight: 0.7}}, Aggregate: true},
+		"peer.reported":                   {Signals: []afp.Signal{{Name: "peer:gw", Weight: 0.7}}},
+		"infra.known-bad":                 {Signals: []afp.Signal{{Name: "reputation", Weight: 0.3}}},
+	}
+	for want, d := range cases {
+		if got := Classify(d); got != want {
+			t.Errorf("Classify = %q, want %q", got, want)
+		}
+	}
+}

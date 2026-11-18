@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +24,9 @@ import (
 	"github.com/Xipzer/agentic-firewall/internal/guard"
 	"github.com/Xipzer/agentic-firewall/internal/journal"
 	"github.com/Xipzer/agentic-firewall/internal/netx"
+	"github.com/Xipzer/agentic-firewall/internal/posture"
 	"github.com/Xipzer/agentic-firewall/internal/reputation"
+	"github.com/Xipzer/agentic-firewall/internal/sensor"
 )
 
 const Agent = "heuristics-v1"
@@ -38,6 +41,7 @@ type Daemon struct {
 	Engine   *fast.Engine
 	Guard    *guard.Guard
 	Events   chan fast.Event
+	Posture  *posture.Controller
 	// Now is the clock; replaceable in tests.
 	Now func() time.Time
 
@@ -51,13 +55,22 @@ type Daemon struct {
 	started   time.Time
 	discover  func() config.Discovered
 	done      chan struct{}
+	internal  []netip.Prefix
+	ticks     int
+	// Kernel probes; replaceable in tests.
+	TableFill func() float64
+	Reclaim   func(keep func(netip.Addr) bool, limit int) (int, error)
+	lastShed  uint64
+	reclaimAt time.Time
+	reclaimMu sync.Mutex
 }
 
 // New builds a daemon. Enforcer, journal and bus may be swapped before Run.
 func New(cfg config.Config, log *slog.Logger) *Daemon {
 	d := &Daemon{Cfg: cfg, Log: log, Now: time.Now, Events: make(chan fast.Event, 16384),
 		cmds: make(chan func(), 64), applyCh: make(chan enforce.Entry, 4096), discover: config.Discover,
-		src: afp.Source{Tier: afp.TierFast, Agent: Agent, Node: cfg.Node}, done: make(chan struct{})}
+		src: afp.Source{Tier: afp.TierFast, Agent: Agent, Node: cfg.Node}, done: make(chan struct{}),
+		TableFill: sensor.ConntrackFill, Reclaim: sensor.Reclaim}
 	return d
 }
 
@@ -90,6 +103,12 @@ func (d *Daemon) Init() error {
 	d.Engine = fast.New(fast.Params{H: d.Cfg.Heuristics, P: d.Cfg.Policy, Local: local, Internal: internal,
 		SensitivePorts: d.Cfg.SensitivePorts, ServicePorts: d.Cfg.ServicePorts, MaxSubjects: d.Cfg.MaxSubjects, Rep: d.Feeds})
 	d.loadTrust()
+	d.internal = internal
+	bg := d.Cfg.BreakGlass
+	pc := posture.DefaultConfig()
+	pc.Auto, pc.MinRate, pc.Surge, pc.AbsRate, pc.FailRatio = bg.Auto, bg.MinRate, bg.Surge, bg.AbsRate, bg.FailRatio
+	pc.Hold, pc.ManualHold = bg.Hold.D(), bg.ManualHold.D()
+	d.Posture = posture.New(pc)
 	if d.Journal == nil {
 		j, err := journal.Open(d.Cfg.Log.Path, d.Cfg.Log.MaxMB, d.Cfg.Log.Keep)
 		if err != nil {
@@ -188,6 +207,13 @@ func (d *Daemon) ingest(ev fast.Event) {
 
 func (d *Daemon) tick(ctx context.Context, now time.Time) {
 	d.checkProbation(ctx, now)
+	d.ticks++
+	if d.ticks%4 == 0 {
+		d.updatePosture(ctx, now)
+	}
+	if d.ticks%120 == 0 && d.enforcing() {
+		_ = d.Enforcer.SetTrusted(ctx, d.Engine.Trusted(now))
+	}
 	for _, dec := range d.Engine.Tick(now) {
 		d.decide(dec, now)
 	}
@@ -196,6 +222,7 @@ func (d *Daemon) tick(ctx context.Context, now time.Time) {
 // decide runs one decision through the rails and out to every consumer.
 func (d *Daemon) decide(dec fast.Decision, now time.Time) *afp.Verdict {
 	v, obs := verdictFrom(dec, d.src, d.Cfg.Policy.ThrottleRate)
+	v.Posture = d.Posture.Level().String()
 	out := d.Guard.Check(v, now)
 	if d.Cfg.Log.Observations != "none" && d.Cfg.Log.Observations != "all" {
 		for _, o := range obs {
@@ -371,6 +398,9 @@ func (d *Daemon) setMode(ctx context.Context, mode string) error {
 		return err
 	}
 	d.Guard.SetMode(mode)
+	if mode == "enforce" {
+		d.applyKernelPosture(ctx, d.Now())
+	}
 	d.Journal.Write(map[string]any{"afp": afp.Version, "type": "event", "ts": d.Now().UTC(), "event": "mode", "mode": mode, "node": d.Cfg.Node})
 	if mode == "enforce" {
 		d.pushReputation(ctx)
@@ -401,6 +431,94 @@ func (d *Daemon) saveTrust() {
 	tmp := d.trustPath() + ".tmp"
 	if os.WriteFile(tmp, b, 0o640) == nil {
 		_ = os.Rename(tmp, d.trustPath())
+	}
+}
+
+func (d *Daemon) updatePosture(ctx context.Context, now time.Time) {
+	p := d.Engine.Pressure(now)
+	p.ConntrackFill = d.TableFill()
+	if d.Posture.Level() == posture.BreakGlass && d.enforcing() {
+		if st, err := d.Enforcer.Stats(ctx); err == nil {
+			shed := st["breakglass_packets"]
+			if shed >= d.lastShed {
+				p.ShedPerSec = float64(shed - d.lastShed)
+			}
+			d.lastShed = shed
+		}
+	}
+	if d.Posture.Update(p, d.Guard.ExhaustedCount(), now) {
+		d.onPostureChange(ctx, now)
+	}
+	if d.Posture.Level() == posture.BreakGlass && d.enforcing() && p.ConntrackFill >= 0.7 {
+		d.reclaim(now)
+	}
+}
+
+// reclaim frees connection-table slots held by half-open or closing
+// connections from untrusted sources, so genuine users can connect again.
+// It runs off the event loop, at most every 5 seconds.
+func (d *Daemon) reclaim(now time.Time) {
+	if now.Sub(d.reclaimAt) < 5*time.Second || !d.reclaimMu.TryLock() {
+		return
+	}
+	d.reclaimAt = now
+	keepSet := append(append(d.Guard.Protected(), d.Engine.Trusted(now)...), d.internal...)
+	go func() {
+		defer d.reclaimMu.Unlock()
+		n, err := d.Reclaim(func(a netip.Addr) bool { return netx.Contains(keepSet, a) }, 200000)
+		if err != nil {
+			d.Log.Error("reclaim connection table", "err", err)
+			return
+		}
+		d.Log.Warn("break-glass reclaimed connection-table slots from untrusted half-open or closing connections", "entries", n)
+		d.Journal.Write(map[string]any{"afp": afp.Version, "type": "event", "ts": time.Now().UTC(), "event": "reclaim", "entries": n, "node": d.Cfg.Node})
+	}()
+}
+
+// onPostureChange applies a new posture everywhere it matters and records
+// why. Break-glass widens how hard afw acts, never what it may act on:
+// protected subjects, harm direction, TTLs and spoof rules are unchanged.
+func (d *Daemon) onPostureChange(ctx context.Context, now time.Time) {
+	lvl := d.Posture.Level()
+	if lvl == posture.BreakGlass {
+		d.Engine.SetSensitivity(d.Cfg.BreakGlass.Sensitivity)
+		d.Guard.SetBudgetFactor(d.Cfg.BreakGlass.BudgetFactor)
+	} else {
+		d.Engine.SetSensitivity(1)
+		d.Guard.SetBudgetFactor(1)
+	}
+	d.applyKernelPosture(ctx, now)
+	reasons := strings.Join(d.Posture.Reasons, "; ")
+	src := afp.Source{Tier: afp.TierFast, Agent: "posture", Node: d.Cfg.Node}
+	o := &afp.Observation{Envelope: afp.NewEnvelope(afp.TypeObservation, src), Event: "sample",
+		Context: map[string]any{"posture": lvl.String(), "reasons": d.Posture.Reasons, "baseline_per_sec": d.Posture.Baseline(),
+			"incumbents": len(d.Engine.Trusted(now)), "enforced": d.enforcing()}}
+	o.TS = now.UTC()
+	d.Journal.Write(o)
+	if lvl == posture.BreakGlass {
+		e := &afp.Escalation{Envelope: afp.NewEnvelope(afp.TypeEscalation, src),
+			Subject: afp.Subject{Kind: afp.SubjectPrefix, Value: "0.0.0.0/0"}, Refs: []string{o.ID},
+			Priority: "critical", Target: afp.TierHuman, Class: "dos.flood", Deadline: afp.FormatTTL(d.Cfg.BreakGlass.Hold.D()),
+			Question: "Break-glass is on: " + reasons + ". Trusted sources keep full access and newcomers share a capped lane. Is this an attack to ride out, or legitimate demand (a launch, a backup) that needs `afw breakglass off`?"}
+		e.TS = now.UTC()
+		d.Journal.Write(e)
+		d.Log.Warn("BREAK-GLASS on", "reasons", reasons)
+	} else {
+		d.Log.Info("posture", "level", lvl.String(), "reasons", reasons)
+	}
+}
+
+func (d *Daemon) applyKernelPosture(ctx context.Context, now time.Time) {
+	if !d.enforcing() {
+		return
+	}
+	var spec *enforce.BreakGlassSpec
+	if d.Posture.Level() == posture.BreakGlass {
+		_ = d.Enforcer.SetTrusted(ctx, d.Engine.Trusted(now))
+		spec = &enforce.BreakGlassSpec{Internal: d.internal, PerSource: d.Cfg.BreakGlass.PerSourceRate, NewcomerRate: d.Cfg.BreakGlass.NewcomerRate}
+	}
+	if err := d.Enforcer.BreakGlass(ctx, spec); err != nil {
+		d.Log.Error("break-glass lane", "err", err)
 	}
 }
 
