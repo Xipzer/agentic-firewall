@@ -69,4 +69,5 @@ These bind v0.2 and v0.3 before they are written:
 - **No rule wider than its evidence.** A compiled rule's match cannot be broader than the subjects in its provenance, without human approval.
 - **The learning loop cannot be trained to allow.** Allow-listing and "benign" labels come only from humans and curated feeds, never from observed traffic. Otherwise an attacker could teach the system that their pattern is normal.
 - **Quarantine and decoys need link-layer proof and rule 9.** Rerouting must never send traffic towards a forgeable source.
+- **No denial of wallet.** An attacker who can trigger escalations can make us spend model tokens. Escalations are grouped into incidents before any model sees them, research scanners never escalate, and the slow tier has a hard daily token budget. When it is spent, the fast tier and rails keep working on their own: the model is an analyst, never a dependency.
 - **A self-harm breaker.** If our own outbound success rate or DNS health drops after new actions, the newest actions roll back first and the incident is escalated.
