@@ -1,0 +1,8 @@
+{
+  "afp": "0.1", "type": "escalation", "id": "esc_01", "ts": "2026-11-18T09:20:00Z",
+  "source": { "tier": "fast", "agent": "heuristics-v1", "node": "gw-1" },
+  "subject": { "kind": "host", "value": "203.0.113.7" },
+  "refs": ["ver_01", "obs_01"],
+  "question": "Throttled on spoofable evidence only. Is this a SYN flood with spoofed sources, or a real scanner? Should it be dropped?",
+  "priority": "normal", "deadline": "10m", "target": "medium"
+}

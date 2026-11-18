@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-firewall.dev/afp/0.1/observation.schema.json",
+  "title": "AFP 0.1 observation: what an enforcer or tier saw",
+  "allOf": [{ "$ref": "common.schema.json#/$defs/envelope" }],
+  "properties": {
+    "type": { "const": "observation" },
+    "event": { "enum": ["new", "established", "update", "destroy", "sample", "counter"] },
+    "flow": {
+      "type": "object",
+      "required": ["src", "dst", "proto"],
+      "properties": {
+        "src": { "type": "string", "description": "ip or ip:port; IPv6 with port uses [addr]:port" },
+        "dst": { "type": "string" },
+        "proto": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "packets": { "type": "integer", "minimum": 0 },
+        "state": { "type": "string" },
+        "direction": { "enum": ["inbound", "outbound", "internal", "transit", "local"] }
+      }
+    },
+    "context": { "type": "object" }
+  },
+  "anyOf": [{ "required": ["flow"] }, { "required": ["context"] }]
+}

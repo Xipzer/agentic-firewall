@@ -1,0 +1,11 @@
+{
+  "afp": "0.1", "type": "verdict", "id": "ver_01", "ts": "2026-11-18T09:20:00Z",
+  "source": { "tier": "fast", "agent": "heuristics-v1", "node": "gw-1" },
+  "subject": { "kind": "host", "value": "203.0.113.7" },
+  "action": "throttle", "params": { "rate": "10/second" },
+  "confidence": 0.62, "ttl": "10m",
+  "reason": "burst of failed TCP handshakes",
+  "escalate": true, "mode": "enforce",
+  "signals": [{ "name": "handshake_fail", "weight": 0.62, "spoofable": true, "detail": "41 of 44 SYNs never completed in 10s" }],
+  "refs": ["obs_01"]
+}

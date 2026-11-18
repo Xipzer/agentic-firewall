@@ -1,0 +1,147 @@
+# agentic-firewall v0.1 example configuration.
+# Copy to /etc/afw/afw.yaml. Every key is optional; defaults are shown or noted.
+
+node: pi-gateway            # name used in AFP messages (default: hostname)
+
+# host:    protect this machine (a server, a desktop, the Pi itself).
+# gateway: protect everything routed through this box. LAN subnets on its
+#          interfaces count as internal.
+# Same engine, same ruleset and same protocol either way; run one of each and
+# link them with crosstalk for the layered setup.
+role: host
+
+# shadow:  install observation only, log what would happen, block nothing.
+# enforce: act. Start in shadow for a few days and read the journal first.
+mode: shadow
+
+# In enforce mode, disarm automatically unless `afw confirm` is run within
+# this window. Protects a remote Pi from locking you out. 0 disables.
+probation: 15m
+
+# Never acted on by any agent. Own addresses, default gateways, DNS resolvers
+# and the SSH client that started afw are added automatically
+# (auto_protect: false turns that off).
+protected:
+  - 192.168.1.1        # router
+  # - 192.168.1.10     # your admin laptop
+auto_protect: true
+
+# LAN ranges. Default: RFC1918, CGNAT, link-local and IPv6 ULA/link-local.
+# internal: [192.168.1.0/24, fd00::/8]
+
+# Internal devices are capped at this action; anything stronger (quarantine)
+# is escalated for a higher tier or a human. observe | throttle | drop
+internal_max_action: observe
+
+# Ports you publish to the internet. Bursts to them count at a tenth.
+service_ports: []
+
+# Logins and admin services: short sessions here count double.
+# sensitive_ports: [21, 22, 23, 445, 1433, 2323, 3306, 3389, 5432, 5900, 6379, 8291, 9200, 27017]
+
+heuristics:
+  window: 10s
+  long_window: 10m        # slow scans
+  handshake_wait: 3s
+  short_session: 5s
+  rate_warn: 5            # new flows/s from one source
+  rate_high: 50
+  ports_warn: 8           # distinct ports in window
+  ports_high: 64
+  ports_long_high: 128    # distinct ports in long_window
+  hosts_warn: 8
+  hosts_high: 64
+  handshake_fail_min: 10
+  short_sessions_warn: 6
+  short_sessions_high: 40
+  aggregate_factor: 4     # /24 and /48 thresholds are this many times higher
+
+policy:
+  observe: 0.35
+  throttle: 0.6
+  drop: 0.85              # also requires non-spoofable evidence
+  throttle_rate: 5/second # new connections per source while throttled
+  base_ttl: 10m
+  max_ttl: 24h            # capped at 7d by validation
+  ttl_multiplier: 4       # repeat offenders: 10m, 40m, 2h40m, 10h40m, 24h
+  min_prefix_v4: 16
+  min_prefix_v6: 32
+
+budget:
+  per_minute: 60          # new throttles/drops per minute, all sources
+  max_active: 4096
+
+# Reputation feeds. Chosen and rated in docs/alpha-sources.md (18 Nov 2026).
+# Every entry is sanitised: private, reserved, protected and over-wide ranges
+# are removed, and a refresh that changes over max_change of a list is refused.
+feeds:
+  - name: spamhaus-drop-v4
+    url: https://www.spamhaus.org/drop/drop_v4.json
+    action: drop
+    direction: both
+    refresh: 12h
+  - name: spamhaus-drop-v6
+    url: https://www.spamhaus.org/drop/drop_v6.json
+    action: drop
+    direction: both
+    refresh: 12h
+  - name: feodo-c2
+    url: https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt
+    action: drop
+    direction: both
+    refresh: 1h
+  - name: et-compromised
+    url: https://rules.emergingthreats.net/blockrules/compromised-ips.txt
+    action: throttle
+    direction: in
+    refresh: 6h
+  - name: blocklist-de
+    url: https://lists.blocklist.de/lists/all.txt
+    action: throttle
+    direction: in          # contains CDN and cloud addresses: never outbound
+    refresh: 1h
+    max_change: 0.8        # 48-hour rolling list, churns fast
+  - name: ipsum-3
+    url: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
+    action: observe
+    min_score: 3
+    weight: 0.25
+    refresh: 24h
+  - name: isc-research-scanners
+    url: https://isc.sans.edu/api/threatcategory/research?json
+    action: benign
+    refresh: 24h
+  - name: tor-exits
+    url: https://check.torproject.org/torbulkexitlist
+    action: observe
+    weight: 0.15
+    refresh: 1h
+
+# Crosstalk links independent nodes (for example a gateway and a server
+# behind it). Peers' verdicts become evidence here, never commands.
+crosstalk:
+  listen: ""               # e.g. "192.168.1.5:7843" (LAN only)
+  key_file: /etc/afw/crosstalk.key   # openssl rand -hex 32, same on every node
+  max_skew: 2m
+  max_ttl: 1h              # peer-derived actions never last longer
+  per_minute: 120
+  peers: []
+  # - node: nas
+  #   url: http://192.168.1.20:7843
+  #   trust: 0.9            # weight given to this peer's confidence
+
+log:
+  path: /var/log/afw/afw.jsonl
+  max_mb: 50
+  keep: 5
+  observations: evidence   # evidence | all (for capture and replay) | none
+
+nft:
+  binary: nft
+  table: afw
+  log_group: 7
+  log_rate: 1000           # sampled new flows per second
+  on_exit: keep            # keep: timed entries lapse on their own; teardown: remove the table
+
+control_socket: /run/afw/afw.sock
+state_dir: /var/lib/afw

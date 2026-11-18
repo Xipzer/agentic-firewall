@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-firewall.dev/afp/0.1/explanation.schema.json",
+  "title": "AFP 0.1 explanation: human-readable reasoning, the audit trail",
+  "allOf": [{ "$ref": "common.schema.json#/$defs/envelope" }],
+  "required": ["about", "summary"],
+  "properties": {
+    "type": { "const": "explanation" },
+    "about": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["note"],
+        "properties": { "ref": { "type": "string" }, "note": { "type": "string" } }
+      }
+    },
+    "confidence": { "$ref": "common.schema.json#/$defs/confidence" }
+  }
+}

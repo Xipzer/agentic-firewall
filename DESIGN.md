@@ -39,9 +39,26 @@ Non-goals for the open core: fleet management, compliance reporting, hosted infe
 
 Slow-tier conclusions become **compiled rules** that the fast tier can apply in microseconds. Over time, more decisions are made cheaply at the edge and fewer need a model. Every compiled rule carries provenance (which incident, which reasoning) and a TTL.
 
+### Host and gateway: one engine, two placements
+
+Host mode and gateway mode are not competing products. They see different things:
+
+- A **gateway** sees every device's internet traffic, including devices that can never run an agent (TVs, cameras, smart plugs). It cannot see traffic between two devices on the same switch, and it cannot tell which program made a connection.
+- A **host** sees its own traffic in full, including attacks from inside the LAN, but nothing about its neighbours.
+
+So v0.1 ships **one engine** with a `role` setting that only changes defaults (which addresses count as internal). The nftables ruleset hooks prerouting and output, which covers both placements. Run one, the other, or both.
+
+When both run, they are **independent but linked** through **crosstalk**: each node publishes the verdicts it reached from its own evidence to its peers as signed AFP verdicts. A receiving node treats them as *evidence* weighted by trust, never as commands, and passes them through its own safety rails. A host that is brute-forced tells the gateway, which then protects every device; a gateway that sees a LAN device scanning tells the hosts. Loops are impossible by construction (`hops`: received verdicts are never relayed), spoofability travels with the evidence, and peer-derived actions are capped in strength and duration. If a peer dies, every node carries on alone. Details and edge cases: [docs/threat-model.md](docs/threat-model.md).
+
+### Spoofable versus proven evidence
+
+A SYN or a UDP packet can carry any source address. Evidence built only from them is marked `spoofable` and can at most **throttle new connections** from that source, never drop it, so an attacker cannot make the firewall cut you off from your DNS resolver by faking its address. Only evidence that needed a completed handshake (or a trusted peer's proven verdict) can drop.
+
 ## Protocol (AFP, Agentic Firewall Protocol)
 
-Transport-agnostic messages, JSON for the reference implementation, protobuf later. Every message has `afp` (version), `id`, `ts` and `source` (tier + agent id).
+Transport-agnostic messages, JSON for the reference implementation, protobuf later. Every message has `afp` (version), `id`, `ts` and `source` (tier + agent id, optional `node`).
+
+The normative v0.1 definitions are the JSON Schemas in [spec/afp/0.1](spec/afp/0.1), with an example of each message. The Go types are tested against them so they cannot drift. Additions over the first draft: verdicts carry `signals` (each with `weight` and `spoofable`), `refs` to the observations behind them, `mode` (`enforce` or `shadow`) and `hops` (for crosstalk); escalations carry `refs`, `question`, `priority`, `deadline` and `target`; an `allow` verdict lifts earlier actions on its subject.
 
 ### Observation
 
@@ -133,7 +150,7 @@ Higher tiers can override lower-tier verdicts. Lower tiers never block on higher
 
 ## Roadmap
 
-1. **v0.1** AFP schemas, single-node gateway on nftables, fast-tier heuristics (rate, reputation, handshake anomalies), JSON log.
+1. **v0.1** (built) AFP schemas, single-node host or gateway on nftables, fast-tier heuristics (rate, scans, handshake failures, short sessions, reputation), safety rails, crosstalk between nodes, JSON log, offline replay, kernel lab tests.
 2. **v0.2** Medium tier with session tracking, throttling and decoy rerouting.
 3. **v0.3** Slow tier with a local LLM, explanations and the rule compiler.
 4. **v0.4** Replay harness and benchmark against public attack datasets (CIC-IDS, UNSW-NB15).

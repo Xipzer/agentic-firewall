@@ -1,0 +1,28 @@
+[Unit]
+Description=agentic-firewall (afw) single-node gateway
+Documentation=https://github.com/Xipzer/agentic-firewall
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/afw run -c /etc/afw/afw.yaml
+Restart=on-failure
+RestartSec=2s
+# Only what afw needs: nftables, NFLOG and conntrack events.
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RuntimeDirectory=afw
+StateDirectory=afw
+LogsDirectory=afw
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

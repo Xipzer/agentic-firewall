@@ -1,0 +1,7 @@
+{
+  "afp": "0.1", "type": "observation", "id": "obs_01", "ts": "2026-11-18T09:20:00Z",
+  "source": { "tier": "dataplane", "agent": "conntrack", "node": "gw-1" },
+  "event": "destroy",
+  "flow": { "src": "203.0.113.7:51544", "dst": "10.0.0.5:443", "proto": "tcp", "bytes": 4210, "packets": 12, "state": "SYN_SENT", "direction": "inbound" },
+  "context": { "sni": "api.example.com", "geo": "NL", "asn": 64500 }
+}

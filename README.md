@@ -34,7 +34,21 @@ Heuristics scale from simple (rate, reputation, geo) to non-trivial (behavioural
 
 ## Status
 
-Early design. Read [DESIGN.md](DESIGN.md) for the architecture, the AFP protocol draft and the roadmap. Contributions, ideas and threat models welcome.
+**v0.1 works**: one Go binary for a Raspberry Pi, mini PC or server.
+
+- **AFP v0.1**: JSON Schemas and examples in [spec/afp/0.1](spec/afp/0.1).
+- **Fast tier**: scores sources for scans (fast, slow, distributed), handshake failures, brute force, connection floods and reputation, then allows, throttles or drops through nftables. Every action expires.
+- **Host or gateway, or both**: the same engine runs in either place, and nodes share verdicts over signed **crosstalk** as advice, not commands.
+- **Safety rails**: protected subjects (auto-detected), spoof-aware actions, action budgets, TTLs, shadow mode, probation and `afw panic`.
+- **Explainable**: every verdict is logged with a plain-English explanation and the observations behind it, and can be replayed offline.
+
+```sh
+go build -o afw ./cmd/afw          # GOOS=linux GOARCH=arm64 for a Pi
+sudo ./afw run -c configs/afw.example.yaml
+sudo ./afw status
+```
+
+Start with [docs/home-testing.md](docs/home-testing.md). The design is in [DESIGN.md](DESIGN.md), what it defends against (and its own failure modes) in [docs/threat-model.md](docs/threat-model.md), and why each threat feed was chosen in [docs/alpha-sources.md](docs/alpha-sources.md). Contributions, ideas and threat models welcome.
 
 ## License
 

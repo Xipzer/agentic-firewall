@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-firewall.dev/afp/0.1/rule.schema.json",
+  "title": "AFP 0.1 rule: a compiled, fast-tier-executable rule with provenance",
+  "allOf": [{ "$ref": "common.schema.json#/$defs/envelope" }],
+  "required": ["match", "action", "ttl", "provenance"],
+  "properties": {
+    "type": { "const": "rule" },
+    "match": { "type": "object", "minProperties": 1 },
+    "action": { "$ref": "common.schema.json#/$defs/action" },
+    "params": { "type": "object" },
+    "ttl": { "$ref": "common.schema.json#/$defs/ttl" },
+    "priority": { "type": "integer" },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "incident": { "type": "string" },
+        "explanation": { "type": "string" },
+        "verdicts": { "$ref": "common.schema.json#/$defs/refs" }
+      },
+      "minProperties": 1
+    }
+  }
+}

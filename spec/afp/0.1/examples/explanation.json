@@ -1,0 +1,8 @@
+{
+  "afp": "0.1", "type": "explanation", "id": "exp_01", "ts": "2026-11-18T09:20:01Z",
+  "source": { "tier": "fast", "agent": "heuristics-v1", "node": "gw-1" },
+  "about": "ver_01",
+  "summary": "203.0.113.7 opened 44 connections to port 443 in 10 seconds and 41 never finished the handshake. That pattern is spoofable, so it was throttled for 10 minutes rather than dropped, and passed up for a closer look.",
+  "evidence": [{ "ref": "obs_01", "note": "handshake never completed (SYN_SENT at teardown)" }],
+  "confidence": 0.62
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-firewall.dev/afp/0.1/verdict.schema.json",
+  "title": "AFP 0.1 verdict: a decision on a host, prefix or flow",
+  "allOf": [
+    { "$ref": "common.schema.json#/$defs/envelope" },
+    {
+      "if": { "properties": { "action": { "not": { "const": "allow" } } } },
+      "then": { "required": ["ttl"] }
+    }
+  ],
+  "required": ["subject", "action", "confidence", "reason"],
+  "properties": {
+    "type": { "const": "verdict" },
+    "subject": { "$ref": "common.schema.json#/$defs/subject" },
+    "action": { "$ref": "common.schema.json#/$defs/action" },
+    "params": { "type": "object" },
+    "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+    "ttl": { "$ref": "common.schema.json#/$defs/ttl" },
+    "reason": { "type": "string", "minLength": 1 },
+    "escalate": { "type": "boolean" },
+    "mode": { "enum": ["enforce", "shadow"] },
+    "signals": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/signal" } },
+    "refs": { "$ref": "common.schema.json#/$defs/refs" },
+    "hops": { "type": "integer", "minimum": 0 }
+  }
+}

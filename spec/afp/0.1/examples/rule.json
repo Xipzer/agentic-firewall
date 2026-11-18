@@ -1,0 +1,7 @@
+{
+  "afp": "0.1", "type": "rule", "id": "rule_01", "ts": "2026-11-18T09:25:00Z",
+  "source": { "tier": "slow", "agent": "analyst" },
+  "match": { "asn": 64500, "dst_port": 443, "handshake_fail_rate": { "gt": 0.5 } },
+  "action": "drop", "ttl": "24h",
+  "provenance": { "incident": "inc_07", "explanation": "exp_07" }
+}
