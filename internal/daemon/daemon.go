@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Xipzer/agentic-firewall/internal/afp"
@@ -22,6 +23,7 @@ import (
 	"github.com/Xipzer/agentic-firewall/internal/crosstalk"
 	"github.com/Xipzer/agentic-firewall/internal/enforce"
 	"github.com/Xipzer/agentic-firewall/internal/fast"
+	"github.com/Xipzer/agentic-firewall/internal/graph"
 	"github.com/Xipzer/agentic-firewall/internal/guard"
 	"github.com/Xipzer/agentic-firewall/internal/incident"
 	"github.com/Xipzer/agentic-firewall/internal/journal"
@@ -45,6 +47,7 @@ type Daemon struct {
 	Events    chan fast.Event
 	Posture   *posture.Controller
 	Ledger    *coverage.Ledger
+	Graph     *graph.Graph
 	Incidents *incident.Grouper
 	// Now is the clock; replaceable in tests.
 	Now func() time.Time
@@ -61,6 +64,7 @@ type Daemon struct {
 	done      chan struct{}
 	internal  []netip.Prefix
 	ticks     int
+	running   atomic.Bool
 	// Kernel probes; replaceable in tests.
 	TableFill func() float64
 	Reclaim   func(keep func(netip.Addr) bool, limit int) (int, error)
@@ -114,6 +118,20 @@ func (d *Daemon) Init() error {
 	pc.Hold, pc.ManualHold = bg.Hold.D(), bg.ManualHold.D()
 	d.Posture = posture.New(pc)
 	d.Ledger = coverage.New()
+	d.Graph = graph.New(0)
+	n := 0
+	for _, f := range JournalFiles(d.Cfg.Log.Path, d.Cfg.Log.Keep) {
+		if d.Cfg.Log.Path == "" || d.Cfg.Log.Path == "-" {
+			break
+		}
+		if fh, err := os.Open(f); err == nil {
+			n += d.Graph.Load(fh)
+			fh.Close()
+		}
+	}
+	if n > 0 {
+		d.Log.Info("evidence graph rebuilt from journal", "messages", n, "nodes", d.Graph.Len())
+	}
 	ic := incident.DefaultConfig()
 	ic.AnalystPerHour, ic.AnalystPerDay, ic.Window = d.Cfg.Analyst.PerHour, d.Cfg.Analyst.PerDay, d.Cfg.Analyst.IncidentWindow.D()
 	d.Incidents = incident.New(ic)
@@ -171,7 +189,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			start(func() { <-ctx.Done(); _ = srv.Close() })
 		}
 	}
+	d.running.Store(true)
 	d.loop(ctx)
+	d.running.Store(false)
 	wg.Wait()
 	d.saveTrust()
 	d.Journal.Flush()
@@ -210,8 +230,27 @@ func (d *Daemon) ingest(ev fast.Event) {
 	dir := d.Engine.Direction(ev.Src.Addr().Unmap(), ev.Dst.Addr().Unmap())
 	d.Ledger.Observe(ev, dir)
 	if d.Cfg.Log.Observations == "all" {
-		d.Journal.Write(ev.Observation(afp.Source{Tier: afp.TierDataplane, Agent: "sensor", Node: d.Cfg.Node}, dir))
+		d.record(ev.Observation(afp.Source{Tier: afp.TierDataplane, Agent: "sensor", Node: d.Cfg.Node}, dir))
 	}
+}
+
+// record writes a message to the journal (the record of truth) and indexes
+// it in the evidence graph. Everything afw says goes through here, so the
+// graph can always be rebuilt from the journal and never disagrees with it.
+func (d *Daemon) record(msg any) {
+	d.Journal.Write(msg)
+	if d.Graph != nil {
+		d.Graph.Ingest(msg)
+	}
+}
+
+// JournalFiles lists a journal and its rotations, oldest first.
+func JournalFiles(path string, keep int) []string {
+	var out []string
+	for i := keep; i >= 1; i-- {
+		out = append(out, fmt.Sprintf("%s.%d", path, i))
+	}
+	return append(out, path)
 }
 
 // escalate records an escalation through the incident grouper, which folds
@@ -225,7 +264,7 @@ func (d *Daemon) escalate(e *afp.Escalation, asset string, now time.Time) {
 		novel = true
 	}
 	if out := d.Incidents.Admit(e, novel, now); out != nil {
-		d.Journal.Write(out)
+		d.record(out)
 	}
 }
 
@@ -253,17 +292,22 @@ func (d *Daemon) tick(ctx context.Context, now time.Time) {
 // decide runs one decision through the rails and out to every consumer.
 func (d *Daemon) decide(dec fast.Decision, now time.Time) *afp.Verdict {
 	v, obs := verdictFrom(dec, d.src, d.Cfg.Policy.ThrottleRate)
+	v.TS = now.UTC() // the decision clock, so replays carry their original times
 	v.Posture = d.Posture.Level().String()
 	out := d.Guard.Check(v, now)
 	if d.Cfg.Log.Observations != "none" && d.Cfg.Log.Observations != "all" {
 		for _, o := range obs {
-			d.Journal.Write(o)
+			d.record(o)
 		}
 	}
-	d.Journal.Write(v)
-	d.Journal.Write(explain(v, &dec, out))
+	d.record(v)
+	x := explain(v, &dec, out)
+	x.TS = v.TS
+	d.record(x)
 	if v.Escalate || out.BudgetExhausted {
-		d.escalate(escalation(v, &dec, out), assetOf(dec), now)
+		e := escalation(v, &dec, out)
+		e.TS = v.TS
+		d.escalate(e, assetOf(dec), now)
 	} else if v.Class != "" {
 		d.Ledger.Classified(assetOf(dec), v.Class, now)
 	}
@@ -288,7 +332,7 @@ func (d *Daemon) decide(dec fast.Decision, now time.Time) *afp.Verdict {
 // peer folds a verdict from another node in as evidence, never as a command.
 func (d *Daemon) peer(r crosstalk.Received) {
 	v := r.Verdict
-	d.Journal.Write(v)
+	d.record(v)
 	p, err := v.Subject.Prefix()
 	if err != nil {
 		return
@@ -434,7 +478,7 @@ func (d *Daemon) setMode(ctx context.Context, mode string) error {
 	if mode == "enforce" {
 		d.applyKernelPosture(ctx, d.Now())
 	}
-	d.Journal.Write(map[string]any{"afp": afp.Version, "type": "event", "ts": d.Now().UTC(), "event": "mode", "mode": mode, "node": d.Cfg.Node})
+	d.record(map[string]any{"afp": afp.Version, "type": "event", "ts": d.Now().UTC(), "event": "mode", "mode": mode, "node": d.Cfg.Node})
 	if mode == "enforce" {
 		d.pushReputation(ctx)
 	}
@@ -504,7 +548,7 @@ func (d *Daemon) reclaim(now time.Time) {
 			return
 		}
 		d.Log.Warn("break-glass reclaimed connection-table slots from untrusted half-open or closing connections", "entries", n)
-		d.Journal.Write(map[string]any{"afp": afp.Version, "type": "event", "ts": time.Now().UTC(), "event": "reclaim", "entries": n, "node": d.Cfg.Node})
+		d.record(map[string]any{"afp": afp.Version, "type": "event", "ts": time.Now().UTC(), "event": "reclaim", "entries": n, "node": d.Cfg.Node})
 	}()
 }
 
@@ -527,7 +571,7 @@ func (d *Daemon) onPostureChange(ctx context.Context, now time.Time) {
 		Context: map[string]any{"posture": lvl.String(), "reasons": d.Posture.Reasons, "baseline_per_sec": d.Posture.Baseline(),
 			"incumbents": len(d.Engine.Trusted(now)), "enforced": d.enforcing()}}
 	o.TS = now.UTC()
-	d.Journal.Write(o)
+	d.record(o)
 	if lvl == posture.BreakGlass {
 		e := &afp.Escalation{Envelope: afp.NewEnvelope(afp.TypeEscalation, src),
 			Subject: afp.Subject{Kind: afp.SubjectPrefix, Value: "0.0.0.0/0"}, Refs: []string{o.ID},
@@ -557,6 +601,10 @@ func (d *Daemon) applyKernelPosture(ctx context.Context, now time.Time) {
 
 // do runs f on the event loop goroutine and waits for it.
 func (d *Daemon) do(f func()) {
+	if !d.running.Load() {
+		f() // no event loop yet (tests, replay, start-up): nothing to race with
+		return
+	}
 	ch := make(chan struct{})
 	select {
 	case d.cmds <- func() { f(); close(ch) }:

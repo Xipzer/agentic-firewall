@@ -76,6 +76,10 @@ Each rung exists to keep work off the next one. Model conclusions compile down i
 
 afw keeps a ledger of what it has examined, per asset (each local service, each LAN device's outbound behaviour): flows, distinct source ranges, attack classes seen, and **saturation**, the share of recent activity that brought nothing new. A saturated asset is routine and needs no extra attention. A sudden drop in saturation (new kinds of sources or attacks) raises escalations to high priority and puts them first in the analyst queue. `afw coverage` shows the least-saturated assets first, plus which classes of the attack universe have actually been exercised.
 
+### Memory that cannot forget or drift
+
+The journal is the append-only record of truth. The **evidence graph** is a deterministic index over it (subjects, assets, classes, incidents, verdicts, escalations, explanations, rules), with every edge taken from an explicit AFP field, so it is complete by construction and identical whether built live or rebuilt from the journal. Agents get bounded **context packs** from it instead of re-reading history, and fall back on it after compaction. Design notes, and what we learned from testing Bevor's code graph: [docs/agent-memory.md](docs/agent-memory.md).
+
 ### Break-glass and coverage
 
 When a flood harms the service and there is nobody specific to block, afw breaks glass: trusted users, protected hosts and the LAN keep full access, everyone else shares a capped lane enforced before connection tracking, and connection-table slots held by half-open attackers are reclaimed. Every verdict and escalation is classified (`class`, e.g. `access.bruteforce`), and [docs/attack-universe.md](docs/attack-universe.md) maps the whole attack universe to what afw can see, name and stop, with the gaps listed.

@@ -55,6 +55,7 @@ func Replay(cfg config.Config, r io.Reader, w io.Writer, log *slog.Logger, local
 	clock := evs[0].Time
 	cfg.Mode = "enforce" // enforce against memory only, so verdicts show what would have happened
 	cfg.Probation = 0
+	cfg.Log.Path = "" // never index the live journal into a replay
 	d := New(cfg, log)
 	d.Now = func() time.Time { return clock }
 	d.discover = func() config.Discovered { return local }

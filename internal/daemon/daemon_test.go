@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/Xipzer/agentic-firewall/internal/config"
 	"github.com/Xipzer/agentic-firewall/internal/crosstalk"
 	"github.com/Xipzer/agentic-firewall/internal/enforce"
+	"github.com/Xipzer/agentic-firewall/internal/graph"
 	"github.com/Xipzer/agentic-firewall/internal/journal"
 )
 
@@ -156,5 +158,31 @@ func TestExplanationIsPlainAndShadowAware(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no explanation written")
+	}
+}
+
+// The live graph and one rebuilt from the journal must be identical: the
+// journal is the record of truth and the graph is only an index over it.
+func TestGraphRebuildsExactlyFromJournal(t *testing.T) {
+	d, _, buf := newTestDaemon(t, "enforce")
+	now := time.Now()
+	d.peer(peerVerdict("103.77.1.9", afp.ActionDrop, 0.95))
+	d.peer(peerVerdict("45.9.20.7", afp.ActionThrottle, 0.95))
+	for _, dec := range d.Engine.Tick(now.Add(time.Second)) {
+		d.decide(dec, now)
+	}
+	if _, err := d.Unblock(context.Background(), "103.77.1.9", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := graph.New(0)
+	rebuilt.Load(bytes.NewReader(buf.Bytes()))
+	if rebuilt.Len() != d.Graph.Len() {
+		t.Fatalf("live %d nodes, rebuilt %d", d.Graph.Len(), rebuilt.Len())
+	}
+	for _, q := range []string{"103.77.1.9", "45.9.20.7"} {
+		id, _ := d.Graph.Resolve(q)
+		if d.Graph.Pack(id, 60) != rebuilt.Pack(id, 60) {
+			t.Fatalf("pack differs for %s", q)
+		}
 	}
 }

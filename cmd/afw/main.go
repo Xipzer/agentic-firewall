@@ -24,6 +24,7 @@ import (
 	"github.com/Xipzer/agentic-firewall/internal/config"
 	"github.com/Xipzer/agentic-firewall/internal/daemon"
 	"github.com/Xipzer/agentic-firewall/internal/enforce"
+	"github.com/Xipzer/agentic-firewall/internal/graph"
 )
 
 var version = "0.1.0-dev"
@@ -34,6 +35,7 @@ Usage:
   afw run      [-c config.yaml]           run the daemon (needs root or CAP_NET_ADMIN)
   afw status   [-c config.yaml]           show mode, protected subjects, counters and feeds
   afw coverage [-c config.yaml]           what has been examined, how saturated, open incidents
+  afw graph    <ip|id|class> [-pack]      what afw knows about something (works offline from the journal)
   afw confirm  [-c config.yaml]           keep enforcing after the probation window
   afw mode     shadow|enforce [-c ...]    switch mode live
   afw unblock  <ip|cidr> [-grace 1h]      lift an action and hold the subject in grace
@@ -54,6 +56,8 @@ func main() {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	cfgPath := fs.String("c", defaultConfig(), "config file")
 	grace := fs.Duration("grace", time.Hour, "unblock: how long to leave the subject alone")
+	pack := fs.Bool("pack", false, "graph: print the bounded context pack an analyst agent receives")
+	journalPath := fs.String("journal", "", "graph: build from this journal instead of asking the daemon")
 	positional := parseInterleaved(fs, args)
 	var err error
 	switch cmd {
@@ -63,6 +67,8 @@ func main() {
 		err = control(*cfgPath, http.MethodGet, "/status", nil)
 	case "coverage":
 		err = control(*cfgPath, http.MethodGet, "/coverage", nil)
+	case "graph":
+		err = need(positional, 1, func() error { return graphCmd(*cfgPath, positional[0], *pack, *journalPath) })
 	case "confirm":
 		err = control(*cfgPath, http.MethodPost, "/confirm", nil)
 	case "mode":
@@ -209,6 +215,56 @@ func panicCmd(cfgPath string) error {
 		return fmt.Errorf("daemon: %v; nft: %v %s", viaDaemon, direct, out)
 	}
 	fmt.Println("afw table removed: nothing from afw is filtering traffic now")
+	return nil
+}
+
+// graphCmd asks the running daemon, or rebuilds the graph from the journal
+// when the daemon is not running (or -journal is given). Both give the same
+// answer: the graph is a pure function of the journal.
+func graphCmd(cfgPath, q string, pack bool, journalPath string) error {
+	if journalPath == "" {
+		v := url.Values{"q": {q}}
+		if pack {
+			v.Set("pack", "1")
+			c, err := client(cfgPath)
+			if err == nil {
+				if resp, err := c.Get("http://afw/graph?" + v.Encode()); err == nil {
+					defer resp.Body.Close()
+					b, _ := io.ReadAll(resp.Body)
+					fmt.Print(string(b))
+					return nil
+				}
+			}
+		} else if err := control(cfgPath, http.MethodGet, "/graph", v); err == nil || !strings.Contains(err.Error(), "is afw running") {
+			return err
+		}
+	}
+	cfg, err := load(cfgPath)
+	if err != nil {
+		return err
+	}
+	files := daemon.JournalFiles(cfg.Log.Path, cfg.Log.Keep)
+	if journalPath != "" {
+		files = []string{journalPath}
+	}
+	g := graph.New(0)
+	for _, f := range files {
+		if fh, err := os.Open(f); err == nil {
+			g.Load(fh)
+			fh.Close()
+		}
+	}
+	id, ok := g.Resolve(q)
+	if !ok {
+		return fmt.Errorf("nothing in the evidence graph matches %q", q)
+	}
+	if pack {
+		fmt.Print(g.Pack(id, 60))
+		return nil
+	}
+	n, _ := g.Node(id)
+	out, _ := json.MarshalIndent(map[string]any{"node": n, "neighbours": g.Neighbours(id, 100)}, "", "  ")
+	fmt.Println(string(out))
 	return nil
 }
 

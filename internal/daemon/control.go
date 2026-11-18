@@ -105,8 +105,8 @@ func (d *Daemon) Unblock(ctx context.Context, subject string, grace time.Duratio
 	if err := d.Enforcer.Remove(ctx, []netip.Prefix{key}); err != nil {
 		return v, err
 	}
-	d.Journal.Write(v)
-	d.Journal.Write(explain(v, nil, out))
+	d.record(v)
+	d.record(explain(v, nil, out))
 	if d.Bus != nil {
 		d.Bus.Publish(v)
 	}
@@ -174,6 +174,20 @@ func (d *Daemon) ServeControl(ctx context.Context, path string, onPanic func()) 
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { reply(w, d.Status(r.Context()), nil) })
 	mux.HandleFunc("GET /coverage", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"coverage": d.Ledger.Report(d.Now()), "incidents": d.Incidents.Open()}, nil)
+	})
+	mux.HandleFunc("GET /graph", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := d.Graph.Resolve(r.URL.Query().Get("q"))
+		if !ok {
+			reply(w, nil, errors.New("nothing in the evidence graph matches that"))
+			return
+		}
+		if r.URL.Query().Get("pack") != "" {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(d.Graph.Pack(id, 60)))
+			return
+		}
+		n, _ := d.Graph.Node(id)
+		reply(w, map[string]any{"node": n, "neighbours": d.Graph.Neighbours(id, 100)}, nil)
 	})
 	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]bool{"was_on_probation": d.Confirm()}, nil)
