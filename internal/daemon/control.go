@@ -35,6 +35,7 @@ type Status struct {
 	Sensors      map[string]uint64            `json:"sensors,omitempty"`
 	JournalDrop  uint64                       `json:"journal_dropped"`
 	Incidents    map[string]uint64            `json:"incidents"`
+	Decoys       map[string]any               `json:"decoys,omitempty"`
 	Extra        map[string]map[string]uint64 `json:"-"`
 }
 
@@ -69,6 +70,9 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		s.Crosstalk = d.Bus.Snapshot()
 	}
 	s.Incidents = d.Incidents.Stats()
+	if d.Tarpit != nil {
+		s.Decoys = d.Tarpit.Snapshot()
+	}
 	if SensorStats != nil {
 		s.Sensors = SensorStats()
 	}

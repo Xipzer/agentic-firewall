@@ -50,6 +50,7 @@ type Config struct {
 	Budget         Budget
 	BreakGlass     BreakGlass `yaml:"breakglass"`
 	Analyst        Analyst
+	Canary         Canary
 	Feeds          []Feed
 	Crosstalk      Crosstalk
 	Log            Log
@@ -109,6 +110,16 @@ type BreakGlass struct {
 	PerSourceRate string   `yaml:"per_source_rate"`
 	Sensitivity   float64  `yaml:"sensitivity"`
 	BudgetFactor  float64  `yaml:"budget_factor"`
+}
+
+// Canary configures decoy ports: ports nothing on this machine serves. Any
+// completed connection to one is proven evidence of probing, and the
+// connection is tarpitted. Off unless ports are listed.
+type Canary struct {
+	Ports    []uint16 `yaml:"ports"`
+	Listen   string   `yaml:"listen"`
+	Hold     Duration `yaml:"hold"`
+	MaxConns int      `yaml:"max_connections"`
 }
 
 // Analyst rations model attention (the slow tier) so that escalation floods
@@ -264,6 +275,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Analyst.PerHour < 0 || c.Analyst.PerDay < c.Analyst.PerHour || c.Analyst.IncidentWindow <= 0 {
 		errs = append(errs, errors.New("analyst: need 0 <= per_hour <= per_day and incident_window > 0"))
+	}
+	if c.Canary.Hold < 0 || c.Canary.Hold.D() > 5*time.Minute || c.Canary.MaxConns < 0 || c.Canary.MaxConns > 4096 {
+		errs = append(errs, errors.New("canary: need 0 <= hold <= 5m and 0 <= max_connections <= 4096"))
+	}
+	for _, cp := range c.Canary.Ports {
+		for _, sp := range c.ServicePorts {
+			if cp == sp {
+				errs = append(errs, fmt.Errorf("canary: port %d is listed as a service port; a decoy must be a port nothing uses", cp))
+			}
+		}
+		if cp == 0 {
+			errs = append(errs, errors.New("canary: port 0 is not valid"))
+		}
 	}
 	if c.MaxSubjects < 128 {
 		errs = append(errs, errors.New("max_subjects must be at least 128"))

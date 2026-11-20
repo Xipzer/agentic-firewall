@@ -4,6 +4,12 @@
 
 Static rules are brittle: either you block everyone and whitelist (terrible UX), or you let things through and react after the fire starts. Agentic Firewall sits in between. It watches flows, lets good traffic through, and remediates the rest in real time, explaining every decision.
 
+## Why now
+
+Attackers already run autonomous AI agents. In October 2026 Microsoft reported a state-aligned group using an open-source agentic framework (ARTEX) against hundreds of organisations, in several cases going **from first targeting to privileged access in under three hours**, and noted that the speed "allows very little time for Defenders to respond". The FBI followed with an advisory in November. A defence that waits for a person to read an alert has already lost that race.
+
+Agentic Firewall is built for it: it decides and acts in the kernel within a fraction of a second, with hard limits that stop the defence being turned against its owner. See [docs/agentic-attackers.md](docs/agentic-attackers.md) for sources, what is covered and what is not.
+
 ## The idea
 
 Security is moving to a nightclub model. Every network gets a door staff of agents that:
@@ -40,6 +46,7 @@ Heuristics scale from simple (rate, reputation, geo) to non-trivial (behavioural
 - **Fast tier**: scores sources for scans (fast, slow, distributed), handshake failures, brute force, connection floods and reputation, then allows, throttles or drops through nftables. Every action expires.
 - **Host or gateway, or both**: the same engine runs in either place, and nodes share verdicts over signed **crosstalk** as advice, not commands.
 - **Safety rails**: protected subjects (auto-detected), spoof-aware actions, action budgets, TTLs, shadow mode, probation and `afw panic`.
+- **Built for machine-speed attackers**: decoy ports block a prober on one touch in about 0.1 s and tarpit its connection; a source that moves through stages (scan, guess passwords, touch a decoy) is named as an intrusion chain and escalated as critical.
 - **Cheap by design**: the kernel and heuristics handle floods with no model calls. Escalations fold into one incident per campaign, model attention is rationed, and it goes first to what a coverage ledger says is new.
 - **Memory for agents**: an evidence graph rebuilt deterministically from the journal; `afw graph <ip> -pack` gives a bounded context pack (a 2 MB campaign packs into 4.5 KB).
 - **Explainable**: every verdict is logged with a plain-English explanation and the observations behind it, and can be replayed offline.

@@ -31,6 +31,10 @@ sudo afw confirm             # ...unless you confirm you can still reach the Pi
 
 Check from a second device that your normal use still works before confirming. Your SSH session's address is protected automatically.
 
+## Decoys
+
+Add a few ports that nothing on the box serves (`canary.ports` in the config). Anything that completes a connection to one is blocked within about a tenth of a second. From another machine, `nc <pi> 2323` should hang, and `afw status` should show the touch. Unblock yourself with `afw unblock <your-ip>`.
+
 ## 3. Gateway, then crosstalk
 
 Set `role: gateway` only once host mode has been quiet. To run both layers, give each node `crosstalk.peers` entries for the other and the same key file (`openssl rand -hex 32`).

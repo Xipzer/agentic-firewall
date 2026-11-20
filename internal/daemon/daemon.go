@@ -12,12 +12,14 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Xipzer/agentic-firewall/internal/afp"
+	"github.com/Xipzer/agentic-firewall/internal/canary"
 	"github.com/Xipzer/agentic-firewall/internal/config"
 	"github.com/Xipzer/agentic-firewall/internal/coverage"
 	"github.com/Xipzer/agentic-firewall/internal/crosstalk"
@@ -48,6 +50,7 @@ type Daemon struct {
 	Posture   *posture.Controller
 	Ledger    *coverage.Ledger
 	Graph     *graph.Graph
+	Tarpit    *canary.Tarpit
 	Incidents *incident.Grouper
 	// Now is the clock; replaceable in tests.
 	Now func() time.Time
@@ -118,6 +121,10 @@ func (d *Daemon) Init() error {
 	pc.Hold, pc.ManualHold = bg.Hold.D(), bg.ManualHold.D()
 	d.Posture = posture.New(pc)
 	d.Ledger = coverage.New()
+	if len(d.Cfg.Canary.Ports) > 0 {
+		d.Tarpit = canary.New(canary.Config{Ports: d.Cfg.Canary.Ports, Listen: d.Cfg.Canary.Listen,
+			Hold: d.Cfg.Canary.Hold.D(), MaxConns: d.Cfg.Canary.MaxConns}, d.Log)
+	}
 	d.Graph = graph.New(0)
 	n := 0
 	for _, f := range JournalFiles(d.Cfg.Log.Path, d.Cfg.Log.Keep) {
@@ -177,6 +184,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	start(func() { d.applier(ctx) })
 	start(func() { d.feedLoop(ctx) })
 	start(func() { d.housekeeping(ctx) })
+	if d.Tarpit != nil {
+		start(func() { d.Tarpit.Run(ctx) })
+	}
 	if d.Bus != nil {
 		start(func() { d.Bus.Run(ctx) })
 		if d.Cfg.Crosstalk.Listen != "" {
@@ -209,6 +219,10 @@ func (d *Daemon) loop(ctx context.Context) {
 	if d.Bus != nil {
 		inbox = d.Bus.Inbox
 	}
+	var hits chan canary.Hit
+	if d.Tarpit != nil {
+		hits = d.Tarpit.Hits
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -219,6 +233,8 @@ func (d *Daemon) loop(ctx context.Context) {
 			d.tick(ctx, d.Now())
 		case r := <-inbox:
 			d.peer(r)
+		case h := <-hits:
+			d.onCanary(h)
 		case f := <-d.cmds:
 			f()
 		}
@@ -327,6 +343,33 @@ func (d *Daemon) decide(dec fast.Decision, now time.Time) *afp.Verdict {
 			"confidence", v.Confidence, "reason", v.Reason)
 	}
 	return v
+}
+
+// onCanary handles a completed connection to a decoy port. It is proven
+// evidence, so the decision is made at once instead of on the next tick:
+// against a machine-speed attacker, the time to block is what matters.
+func (d *Daemon) onCanary(h canary.Hit) {
+	if !h.Src.IsValid() {
+		return
+	}
+	now := d.Now()
+	o := &afp.Observation{Envelope: afp.NewEnvelope(afp.TypeObservation, afp.Source{Tier: afp.TierDataplane, Agent: "decoy", Node: d.Cfg.Node}),
+		Event: "established", Flow: &afp.Flow{Src: h.Src.String(), Dst: h.Dst.String(), Proto: "tcp",
+			Direction: d.Engine.Direction(h.Src.Addr(), h.Dst.Addr()).String()},
+		Context: map[string]any{"decoy_port": h.Dst.Port()}}
+	o.TS = now.UTC()
+	if len(h.Payload) > 0 {
+		// Attacker-written bytes: recorded as quoted data, never interpreted.
+		o.Context["first_bytes"] = strconv.QuoteToASCII(string(h.Payload))
+	}
+	d.record(o)
+	if h.Followup {
+		return // the touch was already counted; this only adds what the client sent
+	}
+	d.Engine.AddCanary(h.Src, h.Dst, now)
+	for _, dec := range d.Engine.Tick(now) {
+		d.decide(dec, now)
+	}
 }
 
 // peer folds a verdict from another node in as evidence, never as a command.

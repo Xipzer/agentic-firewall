@@ -58,6 +58,10 @@ A SYN or a UDP packet can carry any source address. Evidence built only from the
 
 An attacker partly controls what an active defence sees, so the design guarantees that the worst they can make it do costs less than what it stops. The key rule is **harm direction**: a verdict built from what a subject sent us only limits what that subject can start, and never touches connections we start. Forgeable evidence can only throttle, proven history earns immunity from forged evidence, and only proven evidence lengthens punishment. The full rule set, including binding rules for the LLM tier, is in [docs/self-harm.md](docs/self-harm.md).
 
+### Machine-speed attackers
+
+Autonomous attack agents go from first probe to control in hours, probe everything, chain stages and switch paths when blocked. Three parts of the design answer that directly. **Decoy ports** turn their breadth into a tripwire: one completed connection to a port nothing uses is proven evidence, blocked in about a tenth of a second and tarpitted. **Chain detection** links stages from one source (`recon`, `access`, `decoy`, `c2`) within three hours into one `chain.*` class with a longer block and a critical escalation. And every action is safe to take **without a person**, which is what the rails are for. Sources and limits: [docs/agentic-attackers.md](docs/agentic-attackers.md).
+
 ### Cost: the cheapest tier that can decide, decides
 
 Security that reasons with a model about every packet is expensive and slow, and the expense is itself an attack surface (an attacker who can trigger reasoning can run up the bill). afw is built as a cost ladder:
@@ -185,7 +189,7 @@ Higher tiers can override lower-tier verdicts. Lower tiers never block on higher
 ## Roadmap
 
 1. **v0.1** (built) AFP schemas, single-node host or gateway on nftables, fast-tier heuristics (rate, scans, handshake failures, short sessions, reputation), safety rails, crosstalk between nodes, JSON log, offline replay, kernel lab tests.
-2. **v0.2** Medium tier with session tracking, throttling and decoy rerouting.
+2. **v0.2** Reordered for machine-speed attackers ([docs/agentic-attackers.md](docs/agentic-attackers.md)): authentication log sensors, incident linking across devices, egress volume baselines, richer decoys and quarantine with link-layer proof. Basic decoy ports and intrusion-chain detection already shipped in v0.1.
 3. **v0.3** Slow tier with a local LLM, explanations and the rule compiler.
 4. **v0.4** Replay harness and calibration against labelled attack datasets (CIC-IDS, UNSW-NB15): recall per attack class at a fixed false-positive budget, with thresholds calibrated so every high-severity class is recovered, the way agentic pentests are calibrated against human results. Replays are exactly deterministic (tested), so a calibration result is reproducible.
 5. **v1.0** Stable AFP spec.

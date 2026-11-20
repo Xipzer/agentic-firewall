@@ -88,6 +88,12 @@ func escalation(v *afp.Verdict, d *fast.Decision, out guard.Outcome) *afp.Escala
 	case out.BudgetExhausted:
 		e.Priority, e.Target = "critical", afp.TierHuman
 		e.Question = "The action budget is exhausted. Is this a distributed attack that needs a wider response, or is a heuristic misfiring?"
+	case d != nil && len(d.Stages) >= 2:
+		e.Priority = "high"
+		if d.Internal || d.ProvenStages >= 2 {
+			e.Priority, e.Target = "critical", afp.TierHuman
+		}
+		e.Question = fmt.Sprintf("This source went through %s in quick succession, the pattern of an automated intrusion tool working at machine speed. Did any attempt succeed, and is anything it reached compromised?", strings.Join(d.Stages, ", then "))
 	case d != nil && d.Internal:
 		e.Priority = "high"
 		e.Question = "An internal device is behaving like a scanner or attacker. Is it compromised, and should it be quarantined?"

@@ -167,7 +167,7 @@ type labDaemon struct {
 	done    chan error
 }
 
-func startLab(t *testing.T, nft, mode string) *labDaemon {
+func startLab(t *testing.T, nft, mode string, mutate ...func(*config.Config)) *labDaemon {
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.Node, cfg.Mode, cfg.Probation = "lab", mode, 0
@@ -179,6 +179,9 @@ func startLab(t *testing.T, nft, mode string) *labDaemon {
 	cfg.Log.Path = filepath.Join(dir, "afw.jsonl")
 	cfg.NFT.Binary = nft
 	cfg.NFT.OnExit = "teardown"
+	for _, m := range mutate {
+		m(&cfg)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -491,4 +494,70 @@ func TestLabBreakGlassKeepsTrustedUsersServed(t *testing.T) {
 func l2has(t *testing.T, path, needle string) bool {
 	b, _ := os.ReadFile(path)
 	return strings.Contains(string(b), needle)
+}
+
+// One touch of a decoy port must block the source in well under a second,
+// and the decoy must hold the attacker's connection open.
+func TestLabDecoyBlocksAtMachineSpeed(t *testing.T) {
+	nft := labSetup(t)
+	listen(t, target+":22")
+	l := startLab(t, nft, "enforce", func(c *config.Config) {
+		c.Canary.Ports = []uint16{2323, 22} // 22 is in use by a real service here
+		c.Canary.Hold = config.Duration(3 * time.Second)
+	})
+	eventually(t, "decoy listening", 3*time.Second, func() bool {
+		c, err := net.DialTimeout("tcp", target+":2323", 200*time.Millisecond)
+		if err == nil {
+			c.Close()
+		}
+		return err == nil
+	})
+	// The probe above came from this machine's own address: never a subject.
+	time.Sleep(300 * time.Millisecond)
+	if s := nftList(t, nft, "drop4"); strings.Contains(s, target) {
+		t.Fatal("the machine blocked itself")
+	}
+	// The real service on port 22 was not displaced by the decoy.
+	if err := dial(bystander, target+":22", time.Second); err != nil {
+		t.Fatalf("real service unreachable: %v", err)
+	}
+	if strings.Contains(nftList(t, nft, "drop4"), bystander) {
+		t.Fatal("a visit to a real service was treated as a decoy touch")
+	}
+
+	d := net.Dialer{Timeout: time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP(scanner)}}
+	began := time.Now()
+	conn, err := d.Dial("tcp", target+":2323")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var blocked time.Duration
+	eventually(t, "attacker dropped in the kernel", 3*time.Second, func() bool {
+		if strings.Contains(nftList(t, nft, "drop4"), scanner) {
+			blocked = time.Since(began)
+			return true
+		}
+		return false
+	})
+	t.Logf("time from decoy touch to kernel block: %v", blocked.Round(time.Millisecond))
+	if blocked > time.Second {
+		t.Fatalf("too slow: %v", blocked)
+	}
+	_, _ = conn.Write([]byte("GET /admin HTTP/1.1\r\n\r\n")) // on the held connection, after the block
+	if err := dial(scanner, target+":22", 600*time.Millisecond); err == nil {
+		t.Fatal("blocked source can still reach the real service")
+	}
+	if err := dial(bystander, target+":22", time.Second); err != nil {
+		t.Fatalf("bystander collateral: %v", err)
+	}
+	l.d.Journal.Flush()
+	if !l2has(t, l.journal, `"class":"recon.decoy"`) {
+		t.Fatal("decoy verdict missing from the journal")
+	}
+	var st Status
+	st = l.d.Status(context.Background())
+	if st.Decoys == nil || st.Decoys["skipped"].(int) != 1 {
+		t.Fatalf("status should show one skipped decoy port: %+v", st.Decoys)
+	}
 }

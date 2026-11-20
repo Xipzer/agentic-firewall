@@ -56,10 +56,14 @@ type Decision struct {
 	// Incumbent subjects have a proven history of legitimate sessions with us.
 	Incumbent bool
 	// Class names the attack in the taxonomy of docs/attack-universe.md.
-	Class     string
-	Reason    string
-	Evidence  []Event
-	Direction Direction
+	Class string
+	// Stages lists the attack stages this subject went through, oldest first,
+	// when there are at least two (an intrusion chain).
+	Stages       []string
+	ProvenStages int
+	Reason       string
+	Evidence     []Event
+	Direction    Direction
 }
 
 type flowRec struct {
@@ -103,13 +107,30 @@ type subject struct {
 	benign    bool
 	peers     map[string]peerEvidence
 	evidence  []Event
+	// decoy touches (completed handshakes to a port nothing legitimate uses)
+	canary     counter
+	canaryPort uint16
+	// attack stages seen from this subject within ChainWindow
+	stages map[string]*stageRec
 }
+
+type stageRec struct {
+	first, last time.Time
+	proven      bool
+}
+
+// ChainWindow is how long attack stages are remembered when linking them
+// into a chain. Automated intrusion tools go from first probe to privileged
+// access in under three hours; a chain that takes longer is still caught by
+// the per-stage signals.
+const ChainWindow = 3 * time.Hour
 
 type activeAction struct {
 	action afp.Action
 	until  time.Time
 	peer   bool
 	spoof  bool
+	stages int
 }
 
 type Engine struct {
@@ -187,8 +208,8 @@ func (e *Engine) get(key netip.Prefix, agg, internal bool, now time.Time) *subje
 	s := &subject{key: key, agg: agg, internal: internal, lastSeen: now,
 		newConns: newCounter(h.Window.D()), estConns: newCounter(h.Window.D()),
 		attempts: newCounter(failWindow), fails: newCounter(failWindow), short: newCounter(failWindow),
-		repHits: newCounter(h.Window.D()),
-		ports:   newDistinct[uint16](1024), hosts: newDistinct[netip.Addr](1024), sources: newDistinct[netip.Addr](256)}
+		repHits: newCounter(h.Window.D()), canary: newCounter(h.LongWindow.D()),
+		ports: newDistinct[uint16](1024), hosts: newDistinct[netip.Addr](1024), sources: newDistinct[netip.Addr](256)}
 	s.elem = e.lru.PushFront(key)
 	e.subjects[key] = s
 	for len(e.subjects) > e.p.MaxSubjects {
@@ -462,6 +483,93 @@ func (e *Engine) LoadTrust(m map[string]TrustRecord) {
 	}
 }
 
+// AddCanary records that src completed a TCP handshake with a decoy port.
+// Nothing legitimate connects there, and a completed handshake cannot be
+// forged by an off-path attacker, so one touch is strong, proven evidence.
+func (e *Engine) AddCanary(src, dst netip.AddrPort, now time.Time) {
+	a, d := src.Addr().Unmap(), dst.Addr().Unmap()
+	if !a.IsValid() || netx.Contains(e.p.Local, a) {
+		return
+	}
+	dir := e.Direction(a, d)
+	internal := dir == DirOutbound || dir == DirInternal || netx.Contains(e.p.Internal, a)
+	if internal {
+		dir = DirInternal
+	} else {
+		dir = DirInbound
+	}
+	s := e.get(netx.HostKey(a), false, internal, now)
+	s.dir = dir
+	s.canary.add(now, 1)
+	s.canaryPort = dst.Port()
+	s.remember(Event{Time: now, Kind: KindEstablished, Proto: ProtoTCP, Src: src, Dst: dst})
+	e.dirty[s.key] = struct{}{}
+}
+
+// stageOf maps a signal to the attack stage it is evidence of.
+func stageOf(sig afp.Signal, internal bool) string {
+	switch sig.Name {
+	case "port_fanout", "slow_scan", "host_fanout":
+		return "recon"
+	case "short_sessions":
+		return "access"
+	case "canary":
+		return "decoy"
+	case "reputation":
+		if internal {
+			return "c2"
+		}
+	}
+	return ""
+}
+
+// chain updates the subject's stage history from its current signals and
+// returns the stages seen within ChainWindow, in the order they first
+// appeared, with how many are backed by proven evidence.
+func (s *subject) chain(sigs []afp.Signal, now time.Time) (stages []string, proven int, span time.Duration) {
+	for _, sig := range sigs {
+		st := stageOf(sig, s.internal)
+		if st == "" {
+			continue
+		}
+		if s.stages == nil {
+			s.stages = map[string]*stageRec{}
+		}
+		r, ok := s.stages[st]
+		if !ok {
+			r = &stageRec{first: now}
+			s.stages[st] = r
+		}
+		r.last = now
+		r.proven = r.proven || !sig.Spoofable
+	}
+	var first, last time.Time
+	for st, r := range s.stages {
+		if now.Sub(r.last) > ChainWindow {
+			delete(s.stages, st)
+			continue
+		}
+		stages = append(stages, st)
+		if r.proven {
+			proven++
+		}
+		if first.IsZero() || r.first.Before(first) {
+			first = r.first
+		}
+		if r.first.After(last) {
+			last = r.first
+		}
+	}
+	sort.Slice(stages, func(i, j int) bool {
+		a, b := s.stages[stages[i]], s.stages[stages[j]]
+		if !a.first.Equal(b.first) {
+			return a.first.Before(b.first)
+		}
+		return stages[i] < stages[j]
+	})
+	return stages, proven, last.Sub(first)
+}
+
 // AddPeer records evidence about a subject reported by another node.
 func (e *Engine) AddPeer(subj netip.Prefix, node string, weight float64, spoofable bool, ttl time.Duration, reason string, now time.Time) {
 	internal := netx.Contains(e.p.Internal, subj.Addr())
@@ -637,6 +745,10 @@ func (e *Engine) signals(s *subject, now time.Time) []afp.Signal {
 	short := s.short.sum(now)
 	add("short_sessions", ramp(float64(short), float64(h.ShortWarn)*f, float64(h.ShortHigh)*f), false,
 		"%d short completed sessions in %s (sensitive ports count double)", short, failWindow)
+	if n := s.canary.sum(now); n > 0 {
+		// The handshake completed, so the source address is real: this is proven evidence.
+		add("canary", 0.95, false, "completed %d connection(s) to decoy port %d, which nothing legitimate uses", n, s.canaryPort)
+	}
 	if s.repHits.sum(now) > 0 && s.repWeight > 0 {
 		add("reputation", s.repWeight, false, "listed in %s", s.repFeed)
 	}
@@ -679,6 +791,23 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 	if len(sigs) == 0 {
 		return Decision{}, false
 	}
+	var stages []string
+	provenStages := 0
+	if !s.agg {
+		var span time.Duration
+		stages, provenStages, span = s.chain(sigs, now)
+		if len(stages) >= 2 {
+			// Several stages from one source in a short time is the mark of an
+			// automated intrusion chain. It only counts as proven when at least
+			// two stages are proven, so forged traffic cannot be stitched onto
+			// a source's real behaviour to turn a throttle into a drop.
+			sigs = append(sigs, afp.Signal{Name: "kill_chain", Weight: 0.5, Spoofable: provenStages < 2,
+				Detail: fmt.Sprintf("went through %s within %s", strings.Join(stages, ", then "), span.Round(time.Second))})
+			sort.SliceStable(sigs, func(i, j int) bool { return sigs[i].Weight > sigs[j].Weight })
+		} else {
+			stages = nil
+		}
+	}
 	score, nonSpoof := combine(sigs, false), combine(sigs, true)
 	act, spoofLimited := e.actionFor(score, nonSpoof)
 	incumbent := !s.agg && !s.internal && e.Incumbent(s.key, now)
@@ -705,7 +834,9 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 		renew := same && cur.until.Sub(now) < e.p.P.BaseTTL.D()/4
 		// A throttle that now has drop-level but spoofable evidence is re-issued once so it gets escalated.
 		newlySpoofLimited := same && spoofLimited && !cur.spoof
-		if act.Severity() < cur.action.Severity() || (same && !renew && !newlySpoofLimited) {
+		// A chain that gained a stage is re-issued so the progression is recorded and escalated.
+		newStage := same && len(stages) > cur.stages
+		if act.Severity() < cur.action.Severity() || (same && !renew && !newlySpoofLimited && !newStage) {
 			return Decision{}, false
 		}
 	}
@@ -722,14 +853,19 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 		}
 	}
 	ttl := e.ttl(offences)
+	if provenStages >= 2 && act == afp.ActionDrop {
+		// A proven multi-stage intrusion is not a first offence.
+		ttl = max(ttl, e.ttl(2))
+	}
 	if alreadyEnforced && cur.until.After(now.Add(ttl)) {
 		ttl = cur.until.Sub(now)
 	}
-	e.active[s.key] = activeAction{action: act, until: now.Add(ttl), peer: peerDerived, spoof: spoofLimited}
+	e.active[s.key] = activeAction{action: act, until: now.Add(ttl), peer: peerDerived, spoof: spoofLimited, stages: len(stages)}
 	d := Decision{Subject: s.key, Action: act, Score: round(score), NonSpoofScore: round(nonSpoof), TTL: ttl,
 		Signals: sigs, Internal: s.internal, Aggregate: s.agg, SpoofLimited: spoofLimited, PeerDerived: peerDerived,
-		Offences: offences, Evidence: slices.Clone(s.evidence), Direction: s.dir, Incumbent: incumbent}
-	d.Escalate = !s.benign && (spoofLimited || s.internal || s.agg || incumbent || (act != afp.ActionObserve && score < 0.9))
+		Offences: offences, Evidence: slices.Clone(s.evidence), Direction: s.dir, Incumbent: incumbent,
+		Stages: stages, ProvenStages: provenStages}
+	d.Escalate = !s.benign && (spoofLimited || s.internal || s.agg || incumbent || len(stages) >= 2 || (act != afp.ActionObserve && score < 0.9))
 	d.Class = Classify(d)
 	d.Reason = reason(d)
 	return d, true
@@ -748,12 +884,14 @@ func Classify(d Decision) string {
 		if _, ok := has[name]; !ok {
 			has[name] = s.Weight
 		}
-		if top == "" {
+		if top == "" && name != "kill_chain" {
 			top = name
 		}
 	}
 	var c string
 	switch top {
+	case "canary":
+		c = "recon.decoy"
 	case "short_sessions":
 		c = "access.bruteforce"
 	case "established_rate":
@@ -780,9 +918,15 @@ func Classify(d Decision) string {
 	default:
 		c = "unknown"
 	}
-	if d.Internal {
+	if len(d.Stages) >= 2 {
+		c = "chain." + strings.Join(d.Stages, "-")
+	}
+	switch {
+	case d.Internal && c == "infra.known-bad":
+		c = "c2.known-bad" // an inside device talking to listed infrastructure
+	case d.Internal:
 		// An inside device doing any of this is a compromise symptom.
-		c = "lateral." + strings.TrimPrefix(c, "recon.")
+		c = "lateral." + strings.TrimPrefix(strings.TrimPrefix(c, "recon."), "access.")
 	}
 	if d.Aggregate {
 		c += ".distributed"

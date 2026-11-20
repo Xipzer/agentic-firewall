@@ -71,6 +71,17 @@ budget:
   per_minute: 60          # new throttles/drops per minute, all sources
   max_active: 4096
 
+# Decoys: ports that nothing on this machine serves. Automated intrusion
+# tools probe everything, so they touch decoys a real user never would. One
+# completed connection is proven evidence (the address cannot be forged), so
+# the source is blocked in about a tenth of a second, and its connection is
+# held open to waste its time. A port already in use is skipped, never taken
+# over. Leave empty to turn decoys off.
+canary:
+  ports: [2323, 5900, 6379, 9200]   # telnet-alt, VNC, Redis, Elasticsearch: classic targets
+  hold: 30s
+  max_connections: 256
+
 # Break-glass: the emergency posture for floods that harm the service.
 # Trusted sources (earned over 2+ days), protected hosts and the LAN keep full
 # access; everyone else is limited per source and shares one capped lane,

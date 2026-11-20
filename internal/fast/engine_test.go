@@ -362,3 +362,100 @@ func TestClassification(t *testing.T) {
 		}
 	}
 }
+
+// One completed connection to a decoy port is proven evidence: drop at once.
+func TestDecoyTouchDropsImmediately(t *testing.T) {
+	s := newSim()
+	s.e.AddCanary(netip.MustParseAddrPort("45.9.20.7:40000"), netip.MustParseAddrPort("192.168.1.2:2323"), s.now)
+	s.advance(s.at(250 * time.Millisecond))
+	d, ok := s.last("45.9.20.7/32")
+	if !ok || d.Action != afp.ActionDrop || d.SpoofLimited || d.Class != "recon.decoy" {
+		t.Fatalf("want an immediate proven drop, got %+v ok=%v", d, ok)
+	}
+	// This machine's own address can never become a subject.
+	s.e.AddCanary(netip.MustParseAddrPort("192.168.1.2:40000"), netip.MustParseAddrPort("192.168.1.2:2323"), s.now)
+	s.advance(s.at(time.Second))
+	if _, ok := s.last("192.168.1.2/32"); ok {
+		t.Fatal("self became a subject")
+	}
+	// An inside device touching a decoy is a compromise symptom.
+	s.e.AddCanary(netip.MustParseAddrPort("192.168.1.77:40000"), netip.MustParseAddrPort("192.168.1.2:2323"), s.now)
+	s.advance(s.at(2 * time.Second))
+	d, _ = s.last("192.168.1.77/32")
+	if !d.Internal || d.Class != "lateral.decoy" || !d.Escalate {
+		t.Fatalf("internal decoy touch: %+v", d)
+	}
+}
+
+// Scan, then brute force, then a decoy: an automated intrusion chain.
+func TestKillChainIsLinkedAndEscalated(t *testing.T) {
+	s := newSim()
+	src := "103.77.1.9"
+	for i := 0; i < 40; i++ {
+		s.ev(s.at(time.Duration(i)*50*time.Millisecond), KindNew, addrport(src, 40000), addrport("192.168.1.2", 1000+i))
+	}
+	for i := 0; i < 30; i++ {
+		at := s.at(20*time.Second + time.Duration(i)*time.Second)
+		sp := addrport(src, 50000+i)
+		s.ev(at, KindNew, sp, "192.168.1.2:22")
+		s.ev(at.Add(40*time.Millisecond), KindEstablished, sp, "192.168.1.2:22")
+		s.ev(at.Add(900*time.Millisecond), KindEnd, sp, "192.168.1.2:22")
+	}
+	s.advance(s.at(55 * time.Second))
+	d, _ := s.last(src + "/32")
+	if d.Class != "chain.recon-access" || !d.Escalate || len(d.Stages) != 2 {
+		t.Fatalf("want chain.recon-access, got class %q stages %v", d.Class, d.Stages)
+	}
+	if d.ProvenStages != 1 {
+		t.Fatalf("recon is spoofable, access is proven: %d", d.ProvenStages)
+	}
+	n := len(s.out)
+	s.e.AddCanary(netip.MustParseAddrPort(src+":41000"), netip.MustParseAddrPort("192.168.1.2:2323"), s.now)
+	s.advance(s.at(56 * time.Second))
+	if len(s.out) == n {
+		t.Fatal("a chain that gained a stage must be re-issued")
+	}
+	d, _ = s.last(src + "/32")
+	if d.Class != "chain.recon-access-decoy" || d.ProvenStages != 2 || d.Action != afp.ActionDrop {
+		t.Fatalf("got class %q proven %d action %s", d.Class, d.ProvenStages, d.Action)
+	}
+	if d.TTL < 40*time.Minute {
+		t.Fatalf("a proven chain is not a first offence: ttl %v", d.TTL)
+	}
+}
+
+// Forged scan traffic must not be stitched onto a source's real behaviour to
+// turn what deserves a throttle into a drop.
+func TestForgedStageCannotUpgradeToDrop(t *testing.T) {
+	alone, framed := newSim(), newSim()
+	victim := "82.132.1.50"
+	sessions := func(s *sim) {
+		for i := 0; i < 24; i++ { // enough for a throttle on its own, not a drop
+			at := s.at(15*time.Second + time.Duration(i)*time.Second)
+			sp := addrport(victim, 50000+i)
+			s.ev(at, KindNew, sp, "192.168.1.2:8080")
+			s.ev(at.Add(40*time.Millisecond), KindEstablished, sp, "192.168.1.2:8080")
+			s.ev(at.Add(900*time.Millisecond), KindEnd, sp, "192.168.1.2:8080")
+		}
+	}
+	sessions(alone)
+	alone.advance(alone.at(45 * time.Second))
+	base, _ := alone.last(victim + "/32")
+	if base.Action != afp.ActionThrottle {
+		t.Fatalf("baseline should be a throttle, got %s", base.Action)
+	}
+	for i := 0; i < 300; i++ { // attacker forges a scan in the victim's name
+		framed.ev(framed.at(time.Duration(i)*20*time.Millisecond), KindNew, addrport(victim, 40000), addrport("192.168.1.2", 1000+i))
+	}
+	sessions(framed)
+	framed.advance(framed.at(45 * time.Second))
+	for _, d := range framed.out {
+		if d.Subject.Addr().String() == victim && d.Action == afp.ActionDrop {
+			t.Fatalf("forged recon upgraded a throttle to a drop: %+v", d.Signals)
+		}
+	}
+	d, _ := framed.last(victim + "/32")
+	if d.NonSpoofScore > base.NonSpoofScore {
+		t.Fatalf("forged traffic raised the proven score from %v to %v", base.NonSpoofScore, d.NonSpoofScore)
+	}
+}

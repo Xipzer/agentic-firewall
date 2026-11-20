@@ -37,6 +37,8 @@ Class names are dotted: the family first, then detail, then modifiers such as `.
 | | `recon.scan.slow` (spread over minutes) | yes | yes | throttle |
 | | `recon.scan.*.distributed` (many sources in one range) | yes | yes | throttle the range |
 | | service and OS fingerprinting | partly (looks like a scan) | as scan | as scan |
+| | `recon.decoy` (completed connection to a decoy port) | yes | yes | drop in about 0.1 s, on one touch; connection tarpitted |
+| **Automated intrusion chain** | `chain.<stage>-<stage>` (e.g. `chain.recon-access-decoy`): one source moving through stages within 3 hours | yes | yes | drop when two stages are proven; longer block; escalated as high or critical |
 | **Initial access** | `access.bruteforce` (password guessing, credential stuffing) | yes | yes | drop |
 | | exploit of an exposed service (a single crafted request) | flow only | no | **gap**: needs payload or host view (v0.2/v0.3) |
 | | phishing, malicious download | egress flow only | no | **gap** unless the destination is listed |

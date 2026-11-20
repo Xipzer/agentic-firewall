@@ -189,3 +189,22 @@ How to score:
 6. **Review quarterly** and record promotions and demotions in this file with dates, so the default feed set in section 0 always follows the evidence.
 
 **Sources to evaluate next [judgement]:** Spamhaus Botnet C2 (BCL, paid), CrowdSec CTI, Spur (residential proxy detection, paid), Defused (once a feed exists), and GreyNoise Block on its free plan (1 list). Add each as a call source for one quarter before it touches any verdict.
+
+---
+
+## Addendum, 20 Nov 2026: the ARTEX timeline as a test of who was early
+
+Dates from the Microsoft post and BleepingComputer's report of the FBI advisory (links in [agentic-attackers.md](agentic-attackers.md)); the FBI PDF and the vendor posts they cite were not read directly.
+
+| Date (2026) | Event |
+|---|---|
+| July | ARTEX published on GitHub |
+| August | First use by attackers (per the FBI) |
+| September | Storm-0940 campaigns begin (per Microsoft) |
+| 8 Oct | Author removes the repository after abuse reports |
+| 15 to 16 Oct | Huntress and ConnectWise report the supply-chain compromise |
+| 21 Oct | Microsoft attributes it and describes ARTEX |
+| 13 Nov | FBI FLASH advisory; MalwareMustDie publishes a detection pack |
+| 20 Nov | Mainstream press |
+
+**Reading [judgement]:** incident responders (Huntress) and vendor threat teams (Microsoft, CrowdStrike) led the government advisory by three to four weeks and the mainstream press by five. The tool was public for about three months before any of them. The earliest signal would have been the repository itself and the forums discussing it, which this registry does not yet watch. **Proposed addition:** a watch on new offensive-AI frameworks on code hosts (stars and forks growing fast on pentest-agent repositories), rated once it has a record.

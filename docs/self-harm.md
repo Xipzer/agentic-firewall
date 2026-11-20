@@ -51,6 +51,14 @@ Now the same drop only stops that address from opening connections to us. The at
 | Groom trust, then attack | Trust takes sessions on two days and only protects against forged evidence; proven abuse still drops |
 | Spoof a LAN device's address to get it "quarantined" | Internal devices are capped at observe in v0.1. Quarantine (v0.2) must require link-layer identity (MAC, switch port) and proven evidence, never IP alone |
 
+## Decoys and chains are bounded too
+
+- **A decoy cannot take over a real service.** It binds its port directly, so if anything already uses the port the bind fails and that decoy is skipped (tested).
+- **A decoy touch cannot be forged.** The source is only reported after the TCP handshake completes, which an off-path attacker cannot do with someone else's address. The machine's own addresses and protected subjects are never acted on.
+- **A decoy cannot be used to exhaust afw.** Held connections are capped in total and per source with hard deadlines; beyond the caps a touch is still reported but not held. It never parses what it receives, and stores it as escaped data.
+- **A decoy never sends first.** It only writes on an established connection, so it cannot be aimed at a forged address (rule 9).
+- **A chain only counts as proven when two of its stages are proven.** Otherwise forged scan traffic could be stitched onto a source's real behaviour to turn a throttle into a drop (tested: `TestForgedStageCannotUpgradeToDrop`).
+
 ## Break-glass is bounded too
 
 Break-glass lets afw act harder in an emergency (see [attack-universe.md](attack-universe.md)). It is built so the emergency itself cannot be turned against us:
