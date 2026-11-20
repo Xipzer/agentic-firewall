@@ -10,6 +10,7 @@ package coverage
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"sort"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Xipzer/agentic-firewall/internal/fast"
 	"github.com/Xipzer/agentic-firewall/internal/netx"
+	"github.com/Xipzer/agentic-firewall/internal/saturation"
 )
 
 const (
@@ -69,6 +71,16 @@ type asset struct {
 	saturated bool // source map full: further sources are not counted as novel
 	classes   map[string]uint64
 	roll      rolling
+	curve     saturation.Curve // distinct source ranges against flows observed
+	distinct  hll
+}
+
+// sourceCount is exact until the set is full, then estimated.
+func (a *asset) sourceCount() float64 {
+	if !a.saturated {
+		return float64(len(a.sources))
+	}
+	return math.Max(float64(len(a.sources)), a.distinct.estimate())
 }
 
 // Ledger is safe for concurrent use.
@@ -76,6 +88,8 @@ type Ledger struct {
 	mu     sync.Mutex
 	assets map[string]*asset
 	seen   map[string]uint64 // attack classes seen anywhere
+	flows  uint64
+	curve  saturation.Curve // distinct attack classes against flows observed, network-wide
 }
 
 func New() *Ledger { return &Ledger{assets: map[string]*asset{}, seen: map[string]uint64{}} }
@@ -151,7 +165,10 @@ func (l *Ledger) Observe(ev fast.Event, dir fast.Direction) {
 			novel = true
 		}
 	}
+	a.distinct.add(src)
 	a.roll.add(ev.Time, novel)
+	a.curve.Add(float64(a.total), a.sourceCount())
+	l.flows++
 }
 
 // Classified records a decision's attack class against the asset it hit.
@@ -160,6 +177,9 @@ func (l *Ledger) Classified(asset, class string, now time.Time) (novel bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.seen[class]++
+	if l.seen[class] == 1 {
+		l.curve.Add(float64(max(l.flows, 1)), float64(len(l.seen)))
+	}
 	if asset == "" {
 		return l.seen[class] == 1
 	}
@@ -191,10 +211,14 @@ type AssetReport struct {
 	FirstSeen     time.Time         `json:"first_seen"`
 	LastSeen      time.Time         `json:"last_seen"`
 	Flows         uint64            `json:"flows"`
-	SourceRanges  int               `json:"source_ranges"`
+	SourceRanges  int               `json:"source_ranges"` // estimated once above 4096
 	Classes       map[string]uint64 `json:"classes,omitempty"`
 	FlowsLastHour uint32            `json:"flows_last_hour"`
 	Saturation    float64           `json:"saturation"`
+	// Discovery fits the asset's whole history of new source ranges:
+	// "saturating" means a stable population (ceiling estimated), "scaling"
+	// means it keeps meeting new sources, as anything internet-facing does.
+	Discovery saturation.Result `json:"discovery"`
 }
 
 type ClassReport struct {
@@ -210,6 +234,10 @@ type Report struct {
 	Classes []ClassReport `json:"attack_universe"`
 	// Exercised is the share of detectable classes actually seen at least once.
 	Exercised float64 `json:"exercised"`
+	// ClassDiscovery fits new attack classes against traffic seen. Saturating
+	// means this network has shown us its usual threats; a new class after
+	// that is news.
+	ClassDiscovery saturation.Result `json:"class_discovery"`
 }
 
 // Report summarises coverage, least saturated assets first: that is where
@@ -229,7 +257,8 @@ func (l *Ledger) Report(now time.Time) Report {
 			cl[k] = v
 		}
 		r.Assets = append(r.Assets, AssetReport{Asset: a.name, FirstSeen: a.first, LastSeen: a.last, Flows: a.total,
-			SourceRanges: len(a.sources), Classes: cl, FlowsLastHour: obs, Saturation: float64(int(sat*1000)) / 1000})
+			SourceRanges: int(a.sourceCount()), Classes: cl, FlowsLastHour: obs, Saturation: float64(int(sat*1000)) / 1000,
+			Discovery: saturation.Fit(a.curve.Points)})
 	}
 	sort.Slice(r.Assets, func(i, j int) bool {
 		if r.Assets[i].Saturation != r.Assets[j].Saturation {
@@ -253,6 +282,7 @@ func (l *Ledger) Report(now time.Time) Report {
 			}
 		}
 	}
+	r.ClassDiscovery = saturation.Fit(l.curve.Points)
 	if detectable > 0 {
 		r.Exercised = float64(int(float64(exercised)/float64(detectable)*1000)) / 1000
 	}

@@ -76,6 +76,10 @@ Each rung exists to keep work off the next one. Model conclusions compile down i
 
 afw keeps a ledger of what it has examined, per asset (each local service, each LAN device's outbound behaviour): flows, distinct source ranges, attack classes seen, and **saturation**, the share of recent activity that brought nothing new. A saturated asset is routine and needs no extra attention. A sudden drop in saturation (new kinds of sources or attacks) raises escalations to high priority and puts them first in the analyst queue. `afw coverage` shows the least-saturated assets first, plus which classes of the attack universe have actually been exercised.
 
+### Know when to stop
+
+Effort spent finding things follows a curve. Cantina measured 1,610 agentic pentest runs: findings grow as compute^0.54 (doubling compute buys about 40% more), about a quarter of long runs hit a clear ceiling, and stopping at 95% of the estimated ceiling still matched every critical and high finding of human pentests ([source](https://www.cantina.security/blog/ai-vs-human-penetration-test-benchmark)). afw uses the same test: it fits each discovery curve as a ceiling (Hill) or as still growing (power law), compares the fits (AIC), and estimates the ceiling. `afw coverage` reports this per asset (are new kinds of sources still arriving?) and network-wide (has this network shown us its usual threats yet, so that a new class is news?). The v0.3 analyst uses it per incident: investigation stops at 95% of the estimated ceiling, and budgets are planned from the curve rather than guessed. Their caveat applies here too: a flat curve can mean "nothing left" or "hit a wall", so counts are reported next to the shape, and capped counters switch to an estimator so a full table can never fake a ceiling.
+
 ### Memory that cannot forget or drift
 
 The journal is the append-only record of truth. The **evidence graph** is a deterministic index over it (subjects, assets, classes, incidents, verdicts, escalations, explanations, rules), with every edge taken from an explicit AFP field, so it is complete by construction and identical whether built live or rebuilt from the journal. Agents get bounded **context packs** from it instead of re-reading history, and fall back on it after compaction. Design notes, and what we learned from testing Bevor's code graph: [docs/agent-memory.md](docs/agent-memory.md).
@@ -183,5 +187,5 @@ Higher tiers can override lower-tier verdicts. Lower tiers never block on higher
 1. **v0.1** (built) AFP schemas, single-node host or gateway on nftables, fast-tier heuristics (rate, scans, handshake failures, short sessions, reputation), safety rails, crosstalk between nodes, JSON log, offline replay, kernel lab tests.
 2. **v0.2** Medium tier with session tracking, throttling and decoy rerouting.
 3. **v0.3** Slow tier with a local LLM, explanations and the rule compiler.
-4. **v0.4** Replay harness and benchmark against public attack datasets (CIC-IDS, UNSW-NB15).
+4. **v0.4** Replay harness and calibration against labelled attack datasets (CIC-IDS, UNSW-NB15): recall per attack class at a fixed false-positive budget, with thresholds calibrated so every high-severity class is recovered, the way agentic pentests are calibrated against human results. Replays are exactly deterministic (tested), so a calibration result is reproducible.
 5. **v1.0** Stable AFP spec.

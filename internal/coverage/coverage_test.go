@@ -54,3 +54,26 @@ func TestLedgerIsBounded(t *testing.T) {
 		t.Fatalf("assets unbounded: %d", len(l.assets))
 	}
 }
+
+// A home service with a stable set of client ranges saturates and gets a
+// ceiling; an internet-facing one keeps scaling.
+func TestDiscoveryFit(t *testing.T) {
+	l := New()
+	for i := 0; i < 20000; i++ {
+		// new range with probability falling off: about 60 ranges in total
+		r := int(60 * float64(i) / float64(i+2000))
+		l.Observe(ev(fmt.Sprintf("81.%d.1.1:4000", r), 8443, t0.Add(time.Duration(i)*time.Second)), fast.DirInbound)
+		l.Observe(ev(fmt.Sprintf("45.%d.%d.1:5000", (i/250)%250, i%250), 22, t0.Add(time.Duration(i)*time.Second)), fast.DirInbound)
+	}
+	rep := l.Report(t0.Add(20000 * time.Second))
+	got := map[string]string{}
+	for _, a := range rep.Assets {
+		got[a.Asset] = a.Discovery.State
+	}
+	if got["192.168.1.2/8443/tcp"] != "saturating" {
+		t.Errorf("stable client base: %v", got)
+	}
+	if got["192.168.1.2/22/tcp"] != "scaling" {
+		t.Errorf("internet-wide sources: %v", got)
+	}
+}

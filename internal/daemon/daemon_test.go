@@ -186,3 +186,49 @@ func TestGraphRebuildsExactlyFromJournal(t *testing.T) {
 		}
 	}
 }
+
+// Same capture, same config: the same decisions, every time. Cantina found
+// strict same-config reruns of an agent near-deterministic (5-6% spread);
+// the fast tier must be exactly deterministic, so tuning can be trusted.
+func TestReplayIsDeterministic(t *testing.T) {
+	t0 := time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)
+	var lines []string
+	for i := 0; i < 400; i++ {
+		at := t0.Add(time.Duration(i) * 70 * time.Millisecond)
+		src := fmt.Sprintf("45.9.%d.%d:40000", i%7, i%13)
+		lines = append(lines, obs(at, "new", src, fmt.Sprintf("192.168.1.2:%d", 1000+i%90)))
+		if i%3 == 0 {
+			sp := fmt.Sprintf("103.77.1.9:%d", 50000+i)
+			lines = append(lines, obs(at, "new", sp, "192.168.1.2:22"), obs(at.Add(40*time.Millisecond), "established", sp, "192.168.1.2:22"),
+				obs(at.Add(time.Second), "destroy", sp, "192.168.1.2:22"))
+		}
+	}
+	cfg := config.Default()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	local := config.Discovered{Self: []netip.Prefix{netip.MustParsePrefix("192.168.1.2/32")}}
+	run := func() string {
+		var out bytes.Buffer
+		if _, err := Replay(cfg, strings.NewReader(capture(lines...)), &out, quiet, local); err != nil {
+			t.Fatal(err)
+		}
+		var sig []string
+		for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+			var v afp.Verdict
+			if json.Unmarshal([]byte(l), &v) == nil && v.Type == afp.TypeVerdict {
+				sig = append(sig, fmt.Sprintf("%s %s %s %s %s %.3f", v.TS.Format(time.RFC3339Nano), v.Subject.Value, v.Action, v.TTL, v.Class, v.Confidence))
+			}
+		}
+		return strings.Join(sig, "\n")
+	}
+	first := run()
+	if first == "" {
+		t.Fatal("no verdicts")
+	}
+	for i := 0; i < 4; i++ {
+		if again := run(); again != first {
+			t.Fatalf("replay %d differs:\n%s\n---\n%s", i+2, first, again)
+		}
+	}
+}
