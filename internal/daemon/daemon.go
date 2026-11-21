@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,8 +69,11 @@ type Daemon struct {
 	internal  []netip.Prefix
 	local     []netip.Prefix
 	adv       *adviser
-	ticks     int
-	running   atomic.Bool
+	act       *activity
+	// OnPanic is called after the interface removes every rule, to stop the daemon.
+	OnPanic func()
+	ticks   int
+	running atomic.Bool
 	// Kernel probes; replaceable in tests.
 	TableFill func() float64
 	Reclaim   func(keep func(netip.Addr) bool, limit int) (int, error)
@@ -130,13 +134,21 @@ func (d *Daemon) Init() error {
 			Hold: d.Cfg.Canary.Hold.D(), MaxConns: d.Cfg.Canary.MaxConns}, d.Log)
 	}
 	d.Graph = graph.New(0)
+	d.act = &activity{}
 	n := 0
 	for _, f := range JournalFiles(d.Cfg.Log.Path, d.Cfg.Log.Keep) {
 		if d.Cfg.Log.Path == "" || d.Cfg.Log.Path == "-" {
 			break
 		}
 		if fh, err := os.Open(f); err == nil {
-			n += d.Graph.Load(fh)
+			sc := bufio.NewScanner(fh)
+			sc.Buffer(make([]byte, 64<<10), 1<<20)
+			for sc.Scan() {
+				if m := graph.Decode(sc.Bytes()); m != nil {
+					d.index(m)
+					n++
+				}
+			}
 			fh.Close()
 		}
 	}
@@ -190,6 +202,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	start(func() { d.housekeeping(ctx) })
 	if d.Tarpit != nil {
 		start(func() { d.Tarpit.Run(ctx) })
+	}
+	if listen := d.Cfg.UI.Listen; listen != "" {
+		start(func() {
+			if err := d.ServeUI(ctx, listen, d.Cfg.UI.ReadOnly); err != nil {
+				d.Log.Error("interface", "err", err)
+			}
+		})
 	}
 	if sock := d.Cfg.Analyst.Socket; sock != "" {
 		start(func() {
@@ -266,8 +285,18 @@ func (d *Daemon) ingest(ev fast.Event) {
 // graph can always be rebuilt from the journal and never disagrees with it.
 func (d *Daemon) record(msg any) {
 	d.Journal.Write(msg)
+	d.index(msg)
+}
+
+// index feeds a message to everything built on top of the journal: the
+// evidence graph and the interface's recent-decisions list. Reloading the
+// journal at start-up goes through here too, so both survive a restart.
+func (d *Daemon) index(msg any) {
 	if d.Graph != nil {
 		d.Graph.Ingest(msg)
+	}
+	if d.act != nil {
+		d.act.add(msg)
 	}
 }
 

@@ -51,7 +51,9 @@ func explain(v *afp.Verdict, d *fast.Decision, out guard.Outcome) *afp.Explanati
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s was %s", who, plain[v.Action])
 	if v.Action != afp.ActionAllow && v.TTL != "" {
-		fmt.Fprintf(&b, " for %s", v.TTL)
+		if ttl, err := afp.ParseTTL(v.TTL); err == nil {
+			fmt.Fprintf(&b, " for %s", fast.Words(ttl))
+		}
 	}
 	if v.Mode == "shadow" && v.Action != afp.ActionObserve {
 		b.WriteString(" (shadow mode: nothing was actually enforced)")
@@ -61,7 +63,7 @@ func explain(v *afp.Verdict, d *fast.Decision, out guard.Outcome) *afp.Explanati
 		fmt.Fprintf(&b, "Why: %s.", strings.TrimSuffix(v.Reason, "."))
 	}
 	if d != nil && d.Offences > 1 {
-		fmt.Fprintf(&b, " Repeat offence #%d, so the duration was lengthened.", d.Offences)
+		fmt.Fprintf(&b, " This is offence number %d from this source, so it lasts longer.", d.Offences)
 	}
 	for _, n := range out.Notes {
 		fmt.Fprintf(&b, " Safety rail: %s.", n)
@@ -87,24 +89,24 @@ func escalation(v *afp.Verdict, d *fast.Decision, out guard.Outcome) *afp.Escala
 	switch {
 	case out.BudgetExhausted:
 		e.Priority, e.Target = "critical", afp.TierHuman
-		e.Question = "The action budget is exhausted. Is this a distributed attack that needs a wider response, or is a heuristic misfiring?"
+		e.Question = "afw reached its safety limit on new actions, so this one was not taken. Is this a widespread attack that needs a wider response, or is afw misreading normal traffic?"
 	case d != nil && len(d.Stages) >= 2:
 		e.Priority = "high"
 		if d.Internal || d.ProvenStages >= 2 {
 			e.Priority, e.Target = "critical", afp.TierHuman
 		}
-		e.Question = fmt.Sprintf("This source went through %s in quick succession, the pattern of an automated intrusion tool working at machine speed. Did any attempt succeed, and is anything it reached compromised?", strings.Join(d.Stages, ", then "))
+		e.Question = fmt.Sprintf("This source went from %s in quick succession, the pattern of an automated intrusion tool working at machine speed. Did any attempt succeed, and is anything it reached compromised?", fast.StageWords(d.Stages, " to "))
 	case d != nil && d.Internal:
 		e.Priority = "high"
-		e.Question = "An internal device is behaving like a scanner or attacker. Is it compromised, and should it be quarantined?"
+		e.Question = "A device inside your network is behaving like a scanner or attacker. afw is watching it but has not blocked it. Is it compromised, and should it be taken off the network?"
 	case d != nil && d.SpoofLimited:
-		e.Question = "Throttled on spoofable evidence only. Is this a real attacker that should be dropped, or spoofed traffic?"
+		e.Question = "Slowed, not blocked, because this evidence could be faked. Is it a real attacker that should be blocked, or faked traffic?"
 	case d != nil && d.Aggregate:
-		e.Question = "Several addresses in this range are acting together. Is the whole range hostile, or is it shared infrastructure such as CGNAT or a cloud provider?"
+		e.Question = "Several addresses in this range are acting together. Is the whole range hostile, or is it shared by many people, such as a mobile network or a cloud provider?"
 	case len(out.Notes) > 0:
 		e.Question = "A safety rail changed this verdict: " + strings.Join(out.Notes, "; ") + ". Is a different response needed?"
 	default:
-		e.Question = "Fast-tier confidence is moderate. Confirm, extend or lift this action."
+		e.Question = "afw is fairly, not fully, sure about this one. Worth a second look: keep, extend or lift it."
 	}
 	if e.Deadline == "" {
 		e.Deadline = afp.FormatTTL(10 * time.Minute)

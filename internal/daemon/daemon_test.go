@@ -290,7 +290,7 @@ func TestIntrusionChainIsEscalatedAsCritical(t *testing.T) {
 		t.Errorf("payload not stored as escaped data:\n%s", out)
 	}
 	// Exactly one decoy touch was counted, not two.
-	if strings.Contains(out, "completed 2 connection") {
+	if strings.Contains(out, "completed 2 connections") {
 		t.Error("the payload follow-up was counted as a second touch")
 	}
 }

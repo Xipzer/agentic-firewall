@@ -48,6 +48,7 @@ Heuristics scale from simple (rate, reputation, geo) to non-trivial (behavioural
 - **Safety rails**: protected subjects (auto-detected), spoof-aware actions, action budgets, TTLs, shadow mode, probation and `afw panic`.
 - **Built for machine-speed attackers**: decoy ports block a prober on one touch in about 0.1 s and tarpit its connection; a source that moves through stages (scan, guess passwords, touch a decoy) is named as an intrusion chain and escalated as critical.
 - **Does not trust its own AI**: any model it consults is assumed compromisable. Its advice is unproven evidence that can slow an already-flagged source, never block or unblock, and three dishonest answers suspend it.
+- **A small interface for a person**: what needs you, what is restricted and why, every decision, the known gaps, and the controls. Try it with `go run ./cmd/afw demo` ([docs/interface.md](docs/interface.md)).
 - **Cheap by design**: the kernel and heuristics handle floods with no model calls. Escalations fold into one incident per campaign, model attention is rationed, and it goes first to what a coverage ledger says is new.
 - **Memory for agents**: an evidence graph rebuilt deterministically from the journal; `afw graph <ip> -pack` gives a bounded context pack (a 2 MB campaign packs into 4.5 KB).
 - **Explainable**: every verdict is logged with a plain-English explanation and the observations behind it, and can be replayed offline.

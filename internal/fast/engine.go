@@ -508,6 +508,40 @@ func (e *Engine) AddCanary(src, dst netip.AddrPort, now time.Time) {
 	e.dirty[s.key] = struct{}{}
 }
 
+// Words renders a duration the way a person would say it.
+func Words(d time.Duration) string { return words(d) }
+
+func words(d time.Duration) string {
+	d = d.Round(time.Second)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	case d < time.Hour && d%time.Minute == 0:
+		if d == time.Minute {
+			return "a minute"
+		}
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d min %d s", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
+}
+
+var stageWord = map[string]string{"recon": "scanning", "access": "password guessing", "decoy": "touching a decoy", "c2": "contacting a known-bad address"}
+
+// StageWords names attack stages in plain words, joined by sep.
+func StageWords(stages []string, sep string) string {
+	out := make([]string, len(stages))
+	for i, s := range stages {
+		if w, ok := stageWord[s]; ok {
+			out[i] = w
+		} else {
+			out[i] = s
+		}
+	}
+	return strings.Join(out, sep)
+}
+
 // stageOf maps a signal to the attack stage it is evidence of.
 func stageOf(sig afp.Signal, internal bool) string {
 	switch sig.Name {
@@ -739,39 +773,43 @@ func (e *Engine) signals(s *subject, now time.Time) []afp.Signal {
 		}
 	}
 	rate := float64(s.newConns.sum(now)) / 10 / win.Seconds()
-	add("conn_rate", ramp(rate, h.RateWarn*f, h.RateHigh*f), true, "%.1f new flows/s over %s", rate, win)
+	add("conn_rate", ramp(rate, h.RateWarn*f, h.RateHigh*f), true, "%.1f new connections a second over %s", rate, words(win))
 	est := float64(s.estConns.sum(now)) / win.Seconds()
-	add("established_rate", ramp(est, h.RateWarn*f, h.RateHigh*f), false, "%.1f completed handshakes/s over %s", est, win)
+	add("established_rate", ramp(est, h.RateWarn*f, h.RateHigh*f), false, "%.1f completed connections a second over %s", est, words(win))
 
 	ports := s.ports.count(now.Add(-win))
-	add("port_fanout", ramp(float64(ports), float64(h.PortsWarn)*f, float64(h.PortsHigh)*f), true, "%d distinct ports in %s", ports, win)
+	add("port_fanout", ramp(float64(ports), float64(h.PortsWarn)*f, float64(h.PortsHigh)*f), true, "tried %d different ports in %s", ports, words(win))
 	longPorts := s.ports.count(now.Add(-h.LongWindow.D()))
 	add("slow_scan", ramp(float64(longPorts), float64(h.PortsLongHigh)*f/4, float64(h.PortsLongHigh)*f), true,
-		"%d distinct ports in %s", longPorts, h.LongWindow.D())
+		"tried %d different ports over %s", longPorts, words(h.LongWindow.D()))
 	hosts := s.hosts.count(now.Add(-win))
 	hf := f
 	if s.internal {
 		hf *= 8 // one web page can touch dozens of hosts; worms show up through failed handshakes instead
 	}
-	add("host_fanout", ramp(float64(hosts), float64(h.HostsWarn)*hf, float64(h.HostsHigh)*hf), !s.internal, "%d distinct targets in %s", hosts, win)
+	add("host_fanout", ramp(float64(hosts), float64(h.HostsWarn)*hf, float64(h.HostsHigh)*hf), !s.internal, "contacted %d different devices in %s", hosts, words(win))
 
 	attempts, fails := s.attempts.sum(now), s.fails.sum(now)
 	if fails >= uint32(h.FailMin) && attempts > 0 {
 		ratio := math.Min(1, float64(fails)/float64(attempts))
 		if ratio >= 0.5 {
 			w := ramp(float64(fails), float64(h.FailMin)*f, float64(h.FailMin)*10*f) * ratio
-			add("handshake_fail", w, true, "%d of %d TCP handshakes never completed in %s", fails, attempts, failWindow)
+			add("handshake_fail", w, true, "%d of %d connection attempts never completed in %s", fails, attempts, words(failWindow))
 		}
 	}
 	short := s.short.sum(now)
 	add("short_sessions", ramp(float64(short), float64(h.ShortWarn)*f, float64(h.ShortHigh)*f), false,
-		"%d short completed sessions in %s (sensitive ports count double)", short, failWindow)
+		"%d very short sessions in %s (login and admin ports count double)", short, words(failWindow))
 	if n := s.canary.sum(now); n > 0 {
 		// The handshake completed, so the source address is real: this is proven evidence.
-		add("canary", 0.95, false, "completed %d connection(s) to decoy port %d, which nothing legitimate uses", n, s.canaryPort)
+		conns := "a connection"
+		if n > 1 {
+			conns = fmt.Sprintf("%d connections", n)
+		}
+		add("canary", 0.95, false, "completed %s to decoy port %d, which nothing legitimate uses", conns, s.canaryPort)
 	}
 	if s.repHits.sum(now) > 0 && s.repWeight > 0 {
-		add("reputation", s.repWeight, false, "listed in %s", s.repFeed)
+		add("reputation", s.repWeight, false, "on the threat list %s", s.repFeed)
 	}
 	for node, pe := range s.peers {
 		if now.After(pe.until) {
@@ -823,7 +861,7 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 			// two stages are proven, so forged traffic cannot be stitched onto
 			// a source's real behaviour to turn a throttle into a drop.
 			sigs = append(sigs, afp.Signal{Name: "kill_chain", Weight: 0.5, Spoofable: provenStages < 2,
-				Detail: fmt.Sprintf("went through %s within %s", strings.Join(stages, ", then "), span.Round(time.Second))})
+				Detail: fmt.Sprintf("went from %s within %s", StageWords(stages, " to "), words(span))})
 			sort.SliceStable(sigs, func(i, j int) bool { return sigs[i].Weight > sigs[j].Weight })
 		} else {
 			stages = nil
@@ -980,10 +1018,10 @@ func reason(d Decision) string {
 	}
 	r := strings.Join(parts, "; ")
 	if d.SpoofLimited {
-		r += " (evidence is spoofable, so throttled rather than dropped)"
+		r += " (this evidence could be faked, so it was slowed rather than blocked)"
 	}
 	if d.Incumbent {
-		r += " (source has a history of legitimate sessions: judged on proven evidence only; may be a shared address)"
+		r += " (a regular user: judged on proven evidence only; this may be a shared address)"
 	}
 	return r
 }
@@ -1029,6 +1067,35 @@ func (e *Engine) Trusted(now time.Time) []netip.Prefix {
 			out = append(out, k)
 		}
 	}
+	return out
+}
+
+// ActiveInfo is one subject the fast tier currently restricts.
+type ActiveInfo struct {
+	Subject  netip.Prefix
+	Action   afp.Action
+	Until    time.Time
+	Advised  bool // exists only because of a peer's or adviser's evidence
+	Unproven bool // capped at slowing because the evidence could be forged
+}
+
+// ActiveList returns every live throttle or drop, soonest to lapse last.
+func (e *Engine) ActiveList(now time.Time) []ActiveInfo {
+	var out []ActiveInfo
+	for k, a := range e.active {
+		if now.Before(a.until) && a.action.Severity() >= afp.ActionThrottle.Severity() {
+			out = append(out, ActiveInfo{Subject: k, Action: a.action, Until: a.until, Advised: a.peer, Unproven: a.spoof})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Action != out[j].Action {
+			return out[i].Action.Severity() > out[j].Action.Severity()
+		}
+		if !out[i].Until.Equal(out[j].Until) {
+			return out[i].Until.After(out[j].Until)
+		}
+		return out[i].Subject.String() < out[j].Subject.String()
+	})
 	return out
 }
 

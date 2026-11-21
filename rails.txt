@@ -37,6 +37,8 @@ TestAdviserDoorHasNoAdminPowers
 TestRedactHidesTheNetworkMapOnly
 TestPortInUseIsSkippedNotStolen
 TestCapsBoundResources
+TestInterfaceAccessRules
+TestInterfaceNeverWritesHTML
 
 # It still detects what it claims to
 TestSSHBruteForceIsDropped

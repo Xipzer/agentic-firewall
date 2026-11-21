@@ -34,6 +34,8 @@ const usage = `afw: agentic firewall (AFP v0.1)
 Usage:
   afw run      [-c config.yaml]           run the daemon (needs root or CAP_NET_ADMIN)
   afw status   [-c config.yaml]           show mode, protected subjects, counters and feeds
+  afw ui       [-c config.yaml]           print the address of the web interface (needs ui.listen in the config)
+  afw demo     [-listen 127.0.0.1:7844]   try the interface on simulated traffic: no root, touches nothing
   afw coverage [-c config.yaml]           what has been examined, how saturated, open incidents
   afw graph    <ip|id|class> [-pack]      what afw knows about something (works offline from the journal)
   afw confirm  [-c config.yaml]           keep enforcing after the probation window
@@ -59,11 +61,16 @@ func main() {
 	grace := fs.Duration("grace", time.Hour, "unblock: how long to leave the subject alone")
 	pack := fs.Bool("pack", false, "graph: print the bounded context pack an analyst agent receives")
 	journalPath := fs.String("journal", "", "graph: build from this journal instead of asking the daemon")
+	listen := fs.String("listen", "127.0.0.1:7844", "demo: address for the interface")
 	positional := parseInterleaved(fs, args)
 	var err error
 	switch cmd {
 	case "run":
 		err = run(*cfgPath)
+	case "ui":
+		err = uiCmd(*cfgPath)
+	case "demo":
+		err = demo(*listen)
 	case "status":
 		err = control(*cfgPath, http.MethodGet, "/status", nil)
 	case "coverage":
@@ -156,7 +163,9 @@ func run(cfgPath string) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	daemon.Version = version
 	d := daemon.New(cfg, log)
+	d.OnPanic = stop
 	if err := d.Init(); err != nil {
 		return err
 	}
@@ -169,6 +178,36 @@ func run(cfgPath string) error {
 	}()
 	log.Info("afw starting", "version", version, "node", cfg.Node, "role", cfg.Role, "mode", cfg.Mode)
 	return d.Run(ctx)
+}
+
+func uiCmd(cfgPath string) error {
+	cfg, err := load(cfgPath)
+	if err != nil {
+		return err
+	}
+	if cfg.UI.Listen == "" {
+		return errors.New("the interface is off. Set ui.listen in the config, for example 127.0.0.1:7844, and restart afw")
+	}
+	addr, err := daemon.UIAddress(cfg.UI.Listen, cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	fmt.Println(addr)
+	fmt.Fprintln(os.Stderr, "Open this address in a browser on this machine. From another device, tunnel first: ssh -L 7844:"+cfg.UI.Listen+" <this machine>")
+	return nil
+}
+
+func demo(listen string) error {
+	daemon.Version = version + " (demo)"
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintln(os.Stderr, "afw demo: simulated traffic, nothing on this machine is filtered. Ctrl-C to stop.")
+	return daemon.RunDemo(ctx, listen, log, func(stateDir string) {
+		if addr, err := daemon.UIAddress(listen, stateDir); err == nil {
+			fmt.Println(addr)
+		}
+	})
 }
 
 func client(cfgPath string) (*http.Client, error) {

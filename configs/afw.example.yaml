@@ -188,5 +188,12 @@ nft:
   log_rate: 1000           # sampled new flows per second
   on_exit: keep            # keep: timed entries lapse on their own; teardown: remove the table
 
+# The web interface (docs/interface.md). Off unless listen is set. Run
+# `sudo afw ui` for the address. Actions are only offered on 127.0.0.1; a LAN
+# address must be read_only, because the page is not encrypted.
+ui:
+  listen: ""               # e.g. 127.0.0.1:7844
+  read_only: false
+
 control_socket: /run/afw/afw.sock
 state_dir: /var/lib/afw

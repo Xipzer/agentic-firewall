@@ -38,6 +38,7 @@ type Incident struct {
 	Escalations int       `json:"escalations"`
 	Subjects    []string  `json:"subjects"`
 	Analyst     string    `json:"analyst"`
+	Question    string    `json:"question"`
 	subjects    map[string]bool
 	lastEmit    time.Time
 }
@@ -91,6 +92,7 @@ func (g *Grouper) Admit(e *afp.Escalation, novel bool, now time.Time) *afp.Escal
 		inc.Analyst = g.ration(e, now)
 	}
 	inc.Last = now
+	inc.Question = e.Question
 	inc.Escalations++
 	if !inc.subjects[e.Subject.Value] && len(inc.subjects) < 32 {
 		inc.subjects[e.Subject.Value] = true

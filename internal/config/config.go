@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"time"
@@ -51,6 +52,7 @@ type Config struct {
 	BreakGlass     BreakGlass `yaml:"breakglass"`
 	Analyst        Analyst
 	Canary         Canary
+	UI             UI `yaml:"ui"`
 	Feeds          []Feed
 	Crosstalk      Crosstalk
 	Log            Log
@@ -120,6 +122,14 @@ type Canary struct {
 	Listen   string   `yaml:"listen"`
 	Hold     Duration `yaml:"hold"`
 	MaxConns int      `yaml:"max_connections"`
+}
+
+// UI is the built-in web interface. Off unless listen is set. Actions
+// (unblock, mode, panic) are only offered over loopback; a LAN address must
+// be read-only, because the page is served without encryption.
+type UI struct {
+	Listen   string `yaml:"listen"`
+	ReadOnly bool   `yaml:"read_only"`
 }
 
 // Analyst rations model attention (the slow tier) so that escalation floods
@@ -291,6 +301,16 @@ func (c *Config) Validate() error {
 	}
 	if c.Analyst.Socket != "" && c.Analyst.Socket == c.ControlSocket {
 		errs = append(errs, errors.New("analyst: the adviser socket must not be the admin control socket"))
+	}
+	if c.UI.Listen != "" {
+		host, _, err := net.SplitHostPort(c.UI.Listen)
+		ip, perr := netip.ParseAddr(host)
+		switch {
+		case err != nil || (perr != nil && host != "localhost"):
+			errs = append(errs, fmt.Errorf("ui: listen %q must be address:port", c.UI.Listen))
+		case host != "localhost" && !ip.IsLoopback() && !c.UI.ReadOnly:
+			errs = append(errs, errors.New("ui: actions are only offered on 127.0.0.1. To view from another device use an SSH tunnel, or set read_only: true"))
+		}
 	}
 	if c.Canary.Hold < 0 || c.Canary.Hold.D() > 5*time.Minute || c.Canary.MaxConns < 0 || c.Canary.MaxConns > 4096 {
 		errs = append(errs, errors.New("canary: need 0 <= hold <= 5m and 0 <= max_connections <= 4096"))

@@ -12,6 +12,8 @@ lab/rails.sh           # the full gate: all of the above with no internet, plus 
 
 The lab creates a private network namespace, installs the real nftables ruleset, starts the real sensors and attacks itself: a port scan, an SSH brute force, a "protected" host misbehaving, an unblock, shadow mode, probation and panic. Nothing touches your real network.
 
+To see the interface first, with simulated attacks and nothing touched: `go run ./cmd/afw demo`.
+
 ## 1. Shadow mode on the Pi
 
 ```sh
