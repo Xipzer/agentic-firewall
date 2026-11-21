@@ -56,7 +56,9 @@ Some answers no honest adviser would give: asking to lift a block, naming a prot
 - The model runs in a **separate, unprivileged process** whose only access to afw is the adviser socket. It holds the API key; afw never does.
 - **HTTPS only, no redirects followed, no proxy settings honoured, base URL fixed in a root-owned file**, with optional certificate pinning.
 - The model gets **no tools**: it cannot run commands, fetch URLs or read files. It answers one form.
-- **Known-answer checks**: now and then it is asked about a made-up incident with an obvious right answer. A wrong answer is a strike. This detects a swap; the bounds above do not depend on it.
+- **Known-answer checks**: now and then it is asked about a made-up incident with an obvious right answer. A wrong answer is a strike. The checks are generated fresh on the machine and never stored in this public repository, so the answers cannot be looked up or learned in advance ([testing-rules.md](testing-rules.md)). This detects a swapped or weakened model, not a careful adversary; the bounds above do not depend on it.
+- **Who answered is recorded**: the model and version behind every answer are logged, and a change raises an alert.
+- **Internet research, if ever added, is a bonus**: whatever it finds is unproven evidence, exactly like the adviser's own advice, and it is switched off for every benchmark.
 - Optional **second opinion**: two independent providers must agree before advice counts at all.
 - A **local model** gets exactly the same treatment. Running it yourself removes the network path, not the need for the bounds.
 

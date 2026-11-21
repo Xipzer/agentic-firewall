@@ -62,6 +62,10 @@ An attacker partly controls what an active defence sees, so the design guarantee
 
 The slow tier's model can be compromised at the provider, redirected in transit, swapped, or steered by attacker text. afw does not try to detect that first; it bounds what any answer can do. The adviser reaches afw through one socket that offers redacted briefings and a proposal form. A proposal becomes unproven evidence about a source the firewall's own evidence already flagged, so the worst a hostile model achieves is a temporary rate limit on something already suspicious. It cannot lift blocks, name victims, see the network layout, write into the memory other models read, or spread through crosstalk. Dishonest answers are strikes; three suspend it, undo its influence and call a person. [docs/untrusted-model.md](docs/untrusted-model.md).
 
+### Tests that cannot be cheated, and no dependence on the internet
+
+The core needs no internet and is tested with none: the gate (`lab/rails.sh`) runs every test in a namespace with no network, then `railscheck` fails the build if any safety test listed in `rails.txt` was skipped, renamed or removed. Benchmarks measure the foundation alone, with feeds and research off. Anything from the internet is a bonus in live use and counts as unproven evidence, never as instructions. Rules and where they came from: [docs/testing-rules.md](docs/testing-rules.md).
+
 ### Machine-speed attackers
 
 Autonomous attack agents go from first probe to control in hours, probe everything, chain stages and switch paths when blocked. Three parts of the design answer that directly. **Decoy ports** turn their breadth into a tripwire: one completed connection to a port nothing uses is proven evidence, blocked in about a tenth of a second and tarpitted. **Chain detection** links stages from one source (`recon`, `access`, `decoy`, `c2`) within three hours into one `chain.*` class with a longer block and a critical escalation. And every action is safe to take **without a person**, which is what the rails are for. Sources and limits: [docs/agentic-attackers.md](docs/agentic-attackers.md).

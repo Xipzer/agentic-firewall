@@ -1,0 +1,62 @@
+# Safety rails: tests that must run and pass on every change.
+# railscheck fails the build if any of these is skipped, renamed, deleted or
+# left out of the run. Removing a line here is a deliberate, visible act:
+# say why in the commit message.
+
+# The defence cannot be turned on its owner
+TestRails
+TestTTLClampByTier
+TestBudget
+TestMaxActive
+TestShadowNeverEnforces
+TestSpoofableActionsCannotDrainProvenBudget
+TestOnlyHumansLiftAndModelsCannotDrop
+TestSYNPortScanIsThrottledNotDropped
+TestIncumbentCannotBeFramedBySpoofing
+TestSpoofedEvidenceNeverLengthensPunishment
+TestForgedStageCannotUpgradeToDrop
+TestSelfTrafficIgnored
+TestUnblockGraceHolds
+TestBoundedMemory
+TestSlowRampCannotPoisonBaseline
+TestRulesetShape
+
+# Untrusted inputs: feeds, peers, the model
+TestSanitizeStripsLANAndProtected
+TestManagerGuardsAgainstPoisonedRefresh
+TestHTTPOnly
+TestReceiveRules
+TestReplayAndRateLimit
+TestPublishNeverRelays
+TestPeerEvidenceFlowsThroughRails
+TestPeerEvidenceSpoofabilityPropagates
+TestPeerAllowLiftsOnlyPeerDerived
+TestCompromisedAdviserIsBounded
+TestAdviserCannotTouchTrustedOrMalformed
+TestAdviserDoorHasNoAdminPowers
+TestRedactHidesTheNetworkMapOnly
+TestPortInUseIsSkippedNotStolen
+TestCapsBoundResources
+
+# It still detects what it claims to
+TestSSHBruteForceIsDropped
+TestNormalUsageStaysQuiet
+TestDecoyTouchDropsImmediately
+TestKillChainIsLinkedAndEscalated
+TestHarmfulFloodBreaksGlassThenStepsDown
+TestSurgeAloneOnlyElevates
+
+# Records and reproducibility
+TestExamplesMatchSchemaAndGo
+TestGraphRebuildsExactlyFromJournal
+TestReplayIsDeterministic
+TestRailscheckCatchesEveryWayToFakeGreen
+
+# Real kernel (these skip silently without nftables, which railscheck forbids)
+TestLabEnforcerPrimitives
+TestLabEndToEnd
+TestLabShadowNeverBlocks
+TestLabProbationDisarms
+TestLabLargeReputationLoad
+TestLabBreakGlassKeepsTrustedUsersServed
+TestLabDecoyBlocksAtMachineSpeed

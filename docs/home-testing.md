@@ -7,6 +7,7 @@ Four stages. Each one can only fail open: if anything goes wrong, traffic flows 
 ```sh
 go test ./...          # unit tests: heuristics, rails, protocol, feeds, crosstalk
 lab/run.sh             # real kernel in a throwaway network namespace (no sudo)
+lab/rails.sh           # the full gate: all of the above with no internet, plus a check that no safety test was skipped
 ```
 
 The lab creates a private network namespace, installs the real nftables ruleset, starts the real sensors and attacks itself: a port scan, an SSH brute force, a "protected" host misbehaving, an unblock, shadow mode, probation and panic. Nothing touches your real network.

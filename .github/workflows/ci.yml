@@ -5,14 +5,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
       - uses: actions/setup-go@v5
         with: { go-version: stable }
       - run: go vet ./... && go vet -tags lab ./...
       - run: go test -race ./...
-      - name: kernel lab (throwaway network namespace)
-        run: |
-          sudo apt-get install -y nftables
-          go test -c -tags lab -o afw-lab.test ./internal/daemon
-          sudo AFW_NFT=$(command -v nft) unshare -n ./afw-lab.test -test.v -test.run TestLab
       - name: cross-compile for Raspberry Pi
         run: GOOS=linux GOARCH=arm64 go build -o afw-linux-arm64 ./cmd/afw && GOOS=linux GOARCH=arm GOARM=7 go build -o afw-linux-armv7 ./cmd/afw
+      - name: offline gate (no internet; no safety test skipped, renamed or removed)
+        run: |
+          sudo apt-get install -y nftables
+          RAILS_SUDO=1 lab/rails.sh
+      - name: flag changes to safety tests for a person to review
+        run: |
+          git diff --name-only HEAD~1 2>/dev/null | grep -E '(_test\.go$|^rails\.txt$|^lab/|^\.github/)' | sed 's/^/::warning::safety test, manifest or gate changed (needs a human look): /' || true
