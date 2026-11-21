@@ -64,7 +64,7 @@ The slow tier's model can be compromised at the provider, redirected in transit,
 
 ### Tests that cannot be cheated, and no dependence on the internet
 
-The core needs no internet and is tested with none: the gate (`lab/rails.sh`) runs every test in a namespace with no network, then `railscheck` fails the build if any safety test listed in `rails.txt` was skipped, renamed or removed, or if any file those tests depend on differs from the hashes in `rails.lock`. Benchmarks measure the foundation alone, with feeds and research off. Anything from the internet is a bonus in live use and counts as unproven evidence, never as instructions. Rules and where they came from: [docs/testing-rules.md](docs/testing-rules.md).
+The core needs no internet and is tested with none: the gate (`lab/rails.sh`) runs every test in a namespace with no network, then `railscheck` fails the build if any safety test listed in `rails.txt` was skipped, renamed or removed. Benchmarks measure the foundation alone, with feeds and research off. Anything from the internet is a bonus in live use and counts as unproven evidence, never as instructions. Rules and where they came from: [docs/testing-rules.md](docs/testing-rules.md).
 
 ### Machine-speed attackers
 

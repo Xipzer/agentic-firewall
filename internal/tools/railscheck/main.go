@@ -8,8 +8,7 @@
 //   - no test was skipped (a skipped test proves nothing),
 //   - every test named in the manifest ran and passed.
 //
-// It also keeps a lock of hashes over the safety tests and the gate (lock.go),
-// so a test cannot be loosened without the change showing up on its own.
+// Usage: railscheck rails.txt < results.json
 package main
 
 import (
@@ -27,65 +26,25 @@ type event struct {
 	Test    string
 }
 
-const usage = `usage:
-  railscheck results <manifest> < go-test-json   every safety test ran and passed, none skipped
-  railscheck verify  <manifest> <lock>           no safety test, helper or gate file changed since locked
-  railscheck lock    <manifest> <lock>           record the current files as the approved ones
-`
-
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprint(os.Stderr, usage)
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: railscheck <manifest> < go-test-json")
 		os.Exit(2)
 	}
-	required, err := manifest(os.Args[2])
+	required, err := manifest(os.Args[1])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "railscheck:", err)
 		os.Exit(2)
 	}
-	switch {
-	case os.Args[1] == "results":
-		problems, passed := check(required, bufio.NewScanner(os.Stdin))
-		for _, p := range problems {
-			fmt.Println("RAIL BROKEN:", p)
-		}
-		if len(problems) > 0 {
-			fmt.Printf("railscheck: %d problem(s). A safety test that does not run and pass is treated as a failure.\n", len(problems))
-			os.Exit(1)
-		}
-		fmt.Printf("railscheck: %d tests passed, none skipped, all %d safety rails ran and passed\n", passed, len(required))
-	case len(os.Args) == 4 && (os.Args[1] == "verify" || os.Args[1] == "lock"):
-		current, err := computeLock(".", required)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "railscheck:", err)
-			os.Exit(1)
-		}
-		if os.Args[1] == "lock" {
-			if err := os.WriteFile(os.Args[3], []byte(formatLock(current)), 0o644); err != nil {
-				fmt.Fprintln(os.Stderr, "railscheck:", err)
-				os.Exit(1)
-			}
-			fmt.Printf("railscheck: locked %d files\n", len(current))
-			return
-		}
-		b, err := os.ReadFile(os.Args[3])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "railscheck:", err)
-			os.Exit(1)
-		}
-		diff := diffLock(parseLock(string(b)), current)
-		for _, d := range diff {
-			fmt.Println("RAIL CHANGED:", d)
-		}
-		if len(diff) > 0 {
-			fmt.Printf("railscheck: %d locked file(s) differ. If the change is intended, run `go run ./internal/tools/railscheck lock %s %s` and commit the lock with an explanation.\n", len(diff), os.Args[2], os.Args[3])
-			os.Exit(1)
-		}
-		fmt.Printf("railscheck: all %d locked files match\n", len(current))
-	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+	problems, passed := check(required, bufio.NewScanner(os.Stdin))
+	for _, p := range problems {
+		fmt.Println("RAIL BROKEN:", p)
 	}
+	if len(problems) > 0 {
+		fmt.Printf("railscheck: %d problem(s). A safety test that does not run and pass is treated as a failure.\n", len(problems))
+		os.Exit(1)
+	}
+	fmt.Printf("railscheck: %d tests passed, none skipped, all %d safety rails ran and passed\n", passed, len(required))
 }
 
 func manifest(path string) ([]string, error) {

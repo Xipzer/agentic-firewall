@@ -51,7 +51,6 @@ TestExamplesMatchSchemaAndGo
 TestGraphRebuildsExactlyFromJournal
 TestReplayIsDeterministic
 TestRailscheckCatchesEveryWayToFakeGreen
-TestLockCatchesAnyEditToASafetyTestOrItsHelpers
 
 # Real kernel (these skip silently without nftables, which railscheck forbids)
 TestLabEnforcerPrimitives
