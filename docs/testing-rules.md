@@ -30,12 +30,15 @@ Several come from mistakes made and caught in an earlier project on this machine
    - In live use, anything fetched from the internet is treated like the adviser's advice: unproven. It can raise attention or slow an already-flagged source. It cannot block, cannot unblock, and is never read as instructions.
    - The reputation feeds already follow this: optional, sanitised, cached, and afw runs without them.
 
+10. **Watch the momentum, not a seal.** The tests change with every version, so there is no fixed "correct" state to seal. What stays true is the direction: safety tests are added and grow, they do not shrink or vanish. `momentum` recomputes, from git history alone, how every safety test moved in each version: new, grew, reworded, **shrank** or **removed**, with the number of checks before and after. Nothing is stored, so there is no record to overwrite. A supervisor, human or agent, reads one table and one chart and looks only at the lines that went the wrong way. Built; CI posts it on every push and warns when a safety test shrank or vanished.
+
 ## What this does not solve
 
-A person or agent can still weaken a test by editing what it checks. No tool can tell a good edit from a bad one. CI therefore flags every change to a test, to `rails.txt` or to the gate itself for a person to look at, and removing a line from `rails.txt` should always be explained in the commit.
+Momentum shows **that** a safety test lost checks, and a reworded test is listed too, but it cannot judge whether a reworded check is weaker. That judgement belongs to the supervisor. It only works if the supervisor is not the same agent that made the change: an independent reviewer, human or machine, with its own access.
 
 ## Running the gate
 
 ```sh
 lab/rails.sh        # offline tests + real-kernel tests + manifest check, no sudo
+go run ./internal/tools/momentum   # how the safety tests moved, version by version
 ```

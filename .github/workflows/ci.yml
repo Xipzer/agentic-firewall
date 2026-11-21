@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2 }
+        with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version: stable }
       - run: go vet ./... && go vet -tags lab ./...
@@ -16,6 +16,5 @@ jobs:
         run: |
           sudo apt-get install -y nftables
           RAILS_SUDO=1 lab/rails.sh
-      - name: flag changes to safety tests for a person to review
-        run: |
-          git diff --name-only HEAD~1 2>/dev/null | grep -E '(_test\.go$|^rails\.txt$|^lab/|^\.github/)' | sed 's/^/::warning::safety test, manifest or gate changed (needs a human look): /' || true
+      - name: safety-test momentum (recomputed from history; warns if a safety test shrank or vanished)
+        run: go run ./internal/tools/momentum -n 20 -warn >> "$GITHUB_STEP_SUMMARY"
