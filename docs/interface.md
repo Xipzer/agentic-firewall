@@ -2,6 +2,34 @@
 
 A small web page for a person to review afw and act on it. Three static files inside the afw binary, no build step, nothing loaded from anywhere else.
 
+## Previews
+
+All from `afw demo`: simulated traffic, nothing real. Regenerate them with `lab/screenshots.sh`.
+
+**Now.** Is everything all right, and does anything need you?
+
+![Now view: a headline saying three things need you, counts of blocked, slowed and watched sources, a bar strip of the last hour, the items needing a decision, and each restricted source with a draining underline](screenshots/now-dark.png)
+
+**Activity.** What afw has decided, one line per attacker.
+
+![Activity view: a ruled list with time, a square for how hard afw acted, the address and the kind of attack](screenshots/activity.png)
+
+**One source.** Opens over any view.
+
+![Source panel: the address, blocked with time left, the attack as a path from scanning to guessing passwords to hitting a decoy, evidence bars with one striped as could be faked, and its history](screenshots/source.png)
+
+**Coverage.** What afw cannot do, stated up front.
+
+![Coverage view: eight gaps in twenty-nine attack types, a grid of squares coloured handled, partly or gap with counts, and the most targeted services as bars](screenshots/coverage.png)
+
+**System.** Is afw itself healthy, plus the controls.
+
+![System view: afw is healthy, one line per part, the never-blocked list, switches for blocking and emergency mode, and the off switch](screenshots/system.png)
+
+**Light, and on a phone.**
+
+<img alt="Now view in the light theme" src="screenshots/now-light.png" width="62%"> <img alt="Now view on a phone, with the views in a bottom bar" src="screenshots/phone.png" width="24%">
+
 ## Try it without installing anything
 
 ```sh

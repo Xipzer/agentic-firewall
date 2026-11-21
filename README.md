@@ -4,6 +4,13 @@
 
 Static rules are brittle: either you block everyone and whitelist (terrible UX), or you let things through and react after the fire starts. Agentic Firewall sits in between. It watches flows, lets good traffic through, and remediates the rest in real time, explaining every decision.
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/now-light.png">
+  <img alt="The afw interface: three things need you, three sources blocked and one slowed, the last hour as a bar strip, and each restricted source with its time left" src="docs/screenshots/now-dark.png">
+</picture>
+
+The built-in interface, running on simulated attacks. Try it with `go run ./cmd/afw demo`; more views in [docs/interface.md](docs/interface.md).
+
 ## Why now
 
 Attackers already run autonomous AI agents. In October 2026 Microsoft reported a state-aligned group using an open-source agentic framework (ARTEX) against hundreds of organisations, in several cases going **from first targeting to privileged access in under three hours**, and noted that the speed "allows very little time for Defenders to respond". The FBI followed with an advisory in November. A defence that waits for a person to read an alert has already lost that race.
