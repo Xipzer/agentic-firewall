@@ -30,12 +30,17 @@ Several come from mistakes made and caught in an earlier project on this machine
    - In live use, anything fetched from the internet is treated like the adviser's advice: unproven. It can raise attention or slow an already-flagged source. It cannot block, cannot unblock, and is never read as instructions.
    - The reputation feeds already follow this: optional, sanitised, cached, and afw runs without them.
 
+10. **Safety tests are hash-locked.** `rails.lock` records a hash of every file the safety tests depend on: all test files in any package holding a safety test (so shared helpers are covered), the manifest, the gate script, the CI workflow and the checker itself. Any edit fails the build until the lock is rewritten, so loosening a test can never ride along unnoticed inside another change; it appears as its own line in the lock's diff. Built.
+
 ## What this does not solve
 
-A person or agent can still weaken a test by editing what it checks. No tool can tell a good edit from a bad one. CI therefore flags every change to a test, to `rails.txt` or to the gate itself for a person to look at, and removing a line from `rails.txt` should always be explained in the commit.
+The lock makes every change to a safety test **loud**, not impossible: whoever can edit a test can also rewrite the lock. Closing that needs an approval the editor cannot give itself, for example the lock signed with a key that only the owner holds (a hardware key or a phone), or a required owner review on those files in GitHub. Not set up yet; it is the owner's call which.
 
 ## Running the gate
 
 ```sh
-lab/rails.sh        # offline tests + real-kernel tests + manifest check, no sudo
+lab/rails.sh        # hash lock + offline tests + real-kernel tests + manifest check, no sudo
+
+# after an intended change to a safety test, its helpers or the gate:
+go run ./internal/tools/railscheck lock rails.txt rails.lock
 ```

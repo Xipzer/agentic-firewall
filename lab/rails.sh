@@ -28,6 +28,9 @@ go build ./...
 go test -c -tags lab -o "$out/lab.test" ./internal/daemon
 go build -o "$out/railscheck" ./internal/tools/railscheck
 
+# No safety test, helper or gate file may differ from the approved hashes.
+"$out/railscheck" verify rails.txt rails.lock
+
 export AFW_NFT="$NFT" GOPROXY=off GOFLAGS=-mod=mod
 # RAILS_SUDO=1 uses sudo for the namespace, for hosts (such as CI runners)
 # that do not allow unprivileged user namespaces.
@@ -47,4 +50,4 @@ if [[ "${RAILS_SUDO:-}" == 1 ]]; then
   sudo chown -R "$(id -u)" "$out" "$(go env GOCACHE)" "$(go env GOMODCACHE)"
 fi
 go tool test2json -p lab < "$out/lab.raw" > "$out/lab.json"
-cat "$out/unit.json" "$out/lab.json" | "$out/railscheck" rails.txt
+cat "$out/unit.json" "$out/lab.json" | "$out/railscheck" results rails.txt
