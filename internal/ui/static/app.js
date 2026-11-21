@@ -21,36 +21,17 @@ function h(tag, props, ...kids) {
 }
 
 // ---- pictures --------------------------------------------------------------
-// Fixed shapes drawn as SVG nodes. Each attack type keeps one picture
-// everywhere, so it is recognised before it is read.
+// One pictogram per kind of attack (Phosphor, see icons.js), drawn as SVG
+// nodes. State is never an icon: it is the square mark, whose fill is the
+// severity (hollow = watching, half = slowed, solid = blocked).
 const SVG = 'http://www.w3.org/2000/svg';
-const ICONS = {
-  shield: ['M12 3l8 3v6c0 4.6-3.3 8.4-8 9-4.7-.6-8-4.4-8-9V6z'], check: ['M5 13l4 4L19 7'],
-  alert: ['M12 4l9 16H3z', 'M12 10v4', 'M12 17v.5'], ban: ['c12,12,9', 'M5.7 5.7l12.6 12.6'],
-  slow: ['M4 17a8 8 0 1 1 16 0', 'M12 17l-3.5-5'], eye: ['M2 12s4-6.5 10-6.5S22 12 22 12s-4 6.5-10 6.5S2 12 2 12z', 'c12,12,2.5'],
-  scan: ['c12,12,9', 'c12,12,4', 'M12 12l6.4-6.4'], key: ['c8,15,4', 'M11 12l8-8', 'M16 7l3 3', 'M14 9l2 2'],
-  flood: ['M3 8c3-3 6 3 9 0s6 3 9 0', 'M3 13c3-3 6 3 9 0s6 3 9 0', 'M3 18c3-3 6 3 9 0s6 3 9 0'],
-  decoy: ['c12,12,9', 'c12,12,5', 'c12,12,1'],
-  chain: ['M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2', 'M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2'],
-  home: ['M4 11l8-7 8 7v9h-5v-6H9v6H4z'], flag: ['M5 21V4h12l-2.5 4L17 12H5'], bolt: ['M13 3L5 14h6l-1 7 8-11h-6z'],
-  pulse: ['M3 12h4l2-6 4 12 2-6h6'], grid: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z'],
-  gear: ['c12,12,3', 'M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1'],
-  x: ['M6 6l12 12', 'M18 6L6 18'], right: ['M5 12h14', 'M13 6l6 6-6 6'], clock: ['c12,12,9', 'M12 7v5l3 2'],
-  bot: ['M6 9h12v9H6z', 'M12 9V5', 'c12,4,1', 'M9.5 13v1.5', 'M14.5 13v1.5'], data: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 20h16'],
-  user: ['c12,8,4', 'M4 21c0-4 4-6 8-6s8 2 8 6'], q: ['c12,12,9', 'M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7', 'M12 17v.5'],
-};
 function icon(name) {
   const s = document.createElementNS(SVG, 'svg');
-  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ic'); s.setAttribute('aria-hidden', 'true');
-  for (const d of ICONS[name] || ICONS.q) {
-    const c = d[0] === 'c' ? d.slice(1).split(',') : null;
-    const n = document.createElementNS(SVG, c ? 'circle' : 'path');
-    if (c) { n.setAttribute('cx', c[0]); n.setAttribute('cy', c[1]); n.setAttribute('r', c[2]); } else n.setAttribute('d', d);
-    s.append(n);
-  }
+  s.setAttribute('viewBox', '0 0 256 256'); s.setAttribute('class', 'ic'); s.setAttribute('aria-hidden', 'true');
+  for (const d of PH[name] || PH.question) { const n = document.createElementNS(SVG, 'path'); n.setAttribute('d', d); s.append(n); }
   return s;
 }
-const dot = (name, tone, extra) => h('span', { class: 'dot t-' + tone + (extra ? ' ' + extra : '') }, icon(name));
+const mark = (tone, extra) => h('i', { class: 'mk is-' + tone + (extra ? ' ' + extra : ''), 'aria-hidden': 'true' });
 
 // ---- words -----------------------------------------------------------------
 const CLASS = {
@@ -67,7 +48,7 @@ const CLASS = {
 };
 const SHORT = { 'access.bruteforce': 'Password guessing', 'recon.scan.vertical': 'Port scan', 'recon.scan.horizontal': 'Device scan', 'recon.scan.slow': 'Slow scan',
   'recon.decoy': 'Decoy touched', 'dos.syn-flood': 'Flood', 'dos.connection-flood': 'Flood', 'dos.flood': 'Flood', 'infra.known-bad': 'Known-bad address', 'peer.reported': 'Reported by a peer' };
-const STAGE = { recon: ['scan', 'Scanned'], access: ['key', 'Guessed passwords'], decoy: ['decoy', 'Hit a decoy'], c2: ['flag', 'Called a bad address'] };
+const STAGE = { recon: ['binoculars', 'Scanned'], access: ['key', 'Guessed passwords'], decoy: ['target', 'Hit a decoy'], c2: ['flag', 'Called a bad address'] };
 function className(c) {
   if (!c) return '';
   let many = '';
@@ -93,23 +74,22 @@ function shortName(c) {
 }
 function classIcon(c) {
   c = c || '';
-  if (c.startsWith('lateral.')) return 'home';
-  if (c.startsWith('c2.')) return 'flag';
-  if (c.includes('chain')) return 'chain';
+  if (c.startsWith('lateral.')) return 'house';
+  if (c.startsWith('c2.') || c.includes('known-bad')) return 'flag';
+  if (c.includes('chain')) return 'link';
   if (c.includes('bruteforce')) return 'key';
-  if (c.includes('decoy')) return 'decoy';
-  if (c.startsWith('dos.')) return 'flood';
-  if (c.startsWith('recon.')) return 'scan';
-  if (c.includes('known-bad')) return 'flag';
-  if (c.startsWith('exfil.')) return 'data';
+  if (c.includes('decoy')) return 'target';
+  if (c.startsWith('dos.')) return 'waves';
+  if (c.startsWith('recon.')) return 'binoculars';
+  if (c.startsWith('exfil.')) return 'download-simple';
   if (c.startsWith('defence.')) return 'shield';
-  if (c.startsWith('peer.')) return 'user';
-  return 'alert';
+  if (c.startsWith('peer.')) return 'users';
+  return 'warning';
 }
-const ACT = { drop: ['ban', 'Blocked', 'Would block'], throttle: ['slow', 'Slowed', 'Would slow'], observe: ['eye', 'Watching', 'Watching'], allow: ['check', 'Unblocked', 'Unblocked'] };
+const ACT = { drop: ['Blocked', 'Would block'], throttle: ['Slowed', 'Would slow'], observe: ['Watching', 'Watching'], allow: ['Unblocked', 'Unblocked'] };
 const isWould = (action, mode) => mode === 'shadow' && (action === 'drop' || action === 'throttle');
-const actWord = (action, mode) => (ACT[action] || [0, action, action])[isWould(action, mode) ? 2 : 1];
-const actionTag = (action, mode) => h('span', { class: 'tag t-' + action + (isWould(action, mode) ? ' would' : '') }, icon((ACT[action] || ['q'])[0]), actWord(action, mode));
+const actWord = (action, mode) => (ACT[action] || [action, action])[isWould(action, mode) ? 1 : 0];
+const kind = cls => h('span', { class: 'kind' }, icon(classIcon(cls)), h('span', {}, shortName(cls)));
 const PORTS = { 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'Mail', 53: 'DNS', 80: 'Web', 443: 'Web', 445: 'File sharing', 2323: 'Telnet', 3306: 'MySQL', 3389: 'Remote desktop', 5432: 'PostgreSQL', 5900: 'VNC', 6379: 'Redis', 8080: 'Web', 8443: 'Web', 9200: 'Elasticsearch' };
 function assetLabel(a) {
   let m = a.match(/^(.*) \(outbound\)$/);
@@ -140,7 +120,7 @@ function ttlWords(ttl) { const m = /^([0-9.]+)(ms|s|m|h|d)$/.exec(ttl || ''); re
 const tidy = t => (t || '').replace(/^\[[^\]]*\]\s*/, '');
 
 // ---- state -----------------------------------------------------------------
-const VIEWS = [['now', 'Now', 'shield'], ['activity', 'Activity', 'pulse'], ['coverage', 'Coverage', 'grid'], ['system', 'System', 'gear']];
+const VIEWS = [['now', 'Now'], ['activity', 'Activity'], ['coverage', 'Coverage'], ['system', 'System']];
 const S = { st: null, okAt: 0, failing: false, stopped: false, view: '', act: { items: [], more: false, show: '', q: '', pages: 1 }, cov: null, sys: null, armed: null, flash: null, painted: {}, cell: null };
 let token = sessionStorage.getItem('afw-t');
 let opener = null;
@@ -179,8 +159,7 @@ const repaint = () => { S.painted = {}; render(); const s = route().params.get('
 // A risky action takes two presses, in place. No pop-up dialogs.
 function twoStep(key, label, confirmLabel, run, cls) {
   if (S.armed !== key) return h('button', { 'data-k': key, class: cls || '', onclick: () => { S.armed = key; repaint(); } }, label);
-  return [h('button', { 'data-k': key, class: (cls || '').replace('quiet', '') + ' primary', onclick: run }, confirmLabel),
-    h('button', { 'data-k': key + ':no', class: (cls || '').includes('small') ? 'small' : '', onclick: () => { S.armed = null; repaint(); } }, 'Cancel')];
+  return [h('button', { 'data-k': key, class: 'go', onclick: run }, confirmLabel), h('button', { 'data-k': key + ':no', class: 'text', onclick: () => { S.armed = null; repaint(); } }, 'Cancel')];
 }
 async function act(body, done) {
   try { await api('/api/do', body); S.flash = done || null; if (body.action === 'panic') S.stopped = true; }
@@ -188,141 +167,117 @@ async function act(body, done) {
   S.armed = null;
   await tick(true);
 }
-const empty = (ic, tone, text, ...way) => h('div', { class: 'empty' }, dot(ic, tone), h('p', {}, text), way);
-const addrChip = addr => h('button', { class: 'addr', 'data-k': 'src:' + addr, onclick: e => openSource(addr, e.currentTarget) }, addr);
-const details = (key, label, ...body) => h('details', { 'data-k': key }, h('summary', {}, label), body);
+const none = (...text) => h('p', { class: 'none' }, text);
+const addr = a => h('button', { class: 'addr', 'data-k': 'src:' + a, onclick: e => openSource(a, e.currentTarget) }, a);
+const more = (key, label, ...body) => h('details', { 'data-k': key }, h('summary', {}, label), body);
+const head = (text, n) => h('h2', {}, text, n ? h('small', {}, ' ' + n) : null);
+function pathOf(steps) {
+  return h('div', { class: 'path' }, steps.map((s, i) => [i ? h('span', { class: 'to', 'aria-hidden': 'true' }, '\u2192') : null,
+    h('span', { class: 'step' + (s.tone ? ' tone is-' + s.tone : '') }, s.tone ? mark(s.tone) : icon(s.ic), s.name)]));
+}
 
 // ---- frame -----------------------------------------------------------------
 function chrome() {
   const st = S.st, r = route();
   $('node').textContent = st ? ' ' + st.node : '';
-  const pill = $('status');
-  if (st) {
-    const emergency = st.posture === 'breakglass';
-    pill.textContent = emergency ? 'Emergency' : st.mode === 'enforce' ? 'Blocking' : 'Watch-only';
-    pill.className = 'pill t-' + (emergency ? 'bad' : st.mode === 'enforce' ? 'ok' : 'idle');
-  }
   const fresh = $('fresh'), age = Math.round((Date.now() - S.okAt) / 1000);
-  fresh.className = 'dim fresh' + (S.failing || S.stopped ? ' stale' : '');
-  fresh.textContent = S.stopped ? 'afw has stopped' : S.failing ? "Can't reach afw" : !S.okAt ? '' : age < 8 ? 'Live' : age + ' s ago';
-  const urgent = st ? st.attention.length : 0;
-  paint($('nav'), r.view + urgent, () => VIEWS.map(([id, name, ic]) =>
-    h('a', { href: '#/' + id, 'aria-current': id === r.view ? 'page' : null }, icon(ic), name,
-      id === 'now' && urgent ? h('span', { class: 'count', 'aria-label': urgent + ' need you' }, urgent) : null)));
+  fresh.className = 'fresh' + (S.failing || S.stopped ? ' stale' : '');
+  fresh.textContent = S.stopped ? 'afw has stopped' : S.failing ? 'Cannot reach afw' : !S.okAt ? '' : age < 8 ? 'live' : age + ' s behind';
+  const n = st ? st.attention.length : 0;
+  paint($('nav'), r.view + n, () => VIEWS.map(([id, name]) => h('a', { href: '#/' + id, 'aria-current': id === r.view ? 'page' : null }, name,
+    id === 'now' && n ? h('sup', { 'aria-label': n + ' need you' }, n) : null)));
 }
 function gate() {
   $('nav').hidden = true;
-  $('main').replaceChildren(empty('key', 'idle', 'This page needs its access link.',
-    h('p', { class: 'dim' }, 'On the machine running afw, run ', h('code', { class: 'mono' }, 'sudo afw ui'), ' and open the address it prints.')));
+  $('main').replaceChildren(h('h1', { class: 'state' }, 'This page needs its link.'),
+    h('p', { class: 'lede' }, 'On the machine running afw, run ', h('code', {}, 'sudo afw ui'), ' and open the address it prints.'));
 }
 
 // ---- Now -------------------------------------------------------------------
-function chainSteps(cls, tone) {
-  const m = (cls || '').match(/chain\.(.+?)(\.distributed)?$/);
-  if (!m) return null;
-  const parts = m[1].split('-');
-  return h('div', { class: 'steps', role: 'img', 'aria-label': className(cls) },
-    parts.map((p, i) => [i ? h('span', { class: 'arrow' }, icon('right')) : null,
-      h('span', { class: 'step' }, h('span', { class: 'dot sm t-' + tone }, icon((STAGE[p] || ['q'])[0])), (STAGE[p] || [0, p])[1])]));
-}
-function needCard(a, i, ro) {
-  let ic = 'alert', title = a.title, gist = '', acts = [], extra = [];
+function needRow(a, i, ro) {
   const key = 'need:' + (a.do || a.title) + ':' + (a.subject || i);
+  let title = a.title, gist = '', acts = [], extra = [];
   if (a.do === 'confirm') {
-    ic = 'key'; title = 'Can you still get in?'; gist = tidy(a.detail).replace(/^Blocking was switched on recently\. /, '').replace(/, in case.*$/, '.');
-    gist = cap(gist.replace(/^It switches itself off/, 'Blocking turns itself off'));
-    if (!ro) acts.push(h('button', { class: 'primary', 'data-k': 'confirm', onclick: () => act({ action: 'confirm' }, 'Confirmed. Blocking stays on.') }, 'Yes, keep blocking'));
+    title = 'Can you still get in?';
+    gist = cap(tidy(a.detail).replace(/^Blocking was switched on recently\. /, '').replace(/, in case.*$/, '.').replace(/^It switches itself off/, 'Blocking turns itself off'));
+    if (!ro) acts.push(h('button', { class: 'go', 'data-k': 'confirm', onclick: () => act({ action: 'confirm' }, 'Confirmed. Blocking stays on.') }, 'Yes, keep blocking'));
   } else if (a.do === 'breakglass-off') {
-    ic = 'bolt'; title = 'Emergency mode is on'; gist = 'Known users first. Everyone else is limited.';
+    title = 'Emergency mode is on'; gist = 'Known users first. Everyone else is limited.';
     if (!ro) acts.push(twoStep('bg:off', 'Turn off', 'Yes, turn off', () => act({ action: 'breakglass', value: 'off' }, 'Emergency mode is off. It returns by itself if the flood is still hurting.')));
-    extra.push(details(key, 'Why it came on', h('p', {}, a.detail)));
+    extra.push(more(key, 'Why it came on', h('p', {}, a.detail)));
   } else if (a.do === 'adviser-resume') {
-    ic = 'bot'; title = 'AI adviser suspended'; gist = 'It gave answers an honest one would not.';
+    title = 'AI adviser suspended'; gist = 'It gave answers an honest one would not.';
     if (!ro) acts.push(twoStep('adv', 'Resume', 'Yes, resume', () => act({ action: 'adviser-resume' }, 'The adviser was resumed.')));
-    extra.push(details(key, 'What happened', h('p', {}, a.detail)));
+    extra.push(more(key, 'What happened', h('p', {}, a.detail)));
   } else if (a.do === 'open-system') {
-    ic = 'gear'; gist = ''; acts.push(h('a', { href: '#/system' }, 'Open System'));
-    extra.push(details(key, 'Details', h('p', {}, a.detail)));
+    acts.push(h('a', { href: '#/system' }, 'Open System')); extra.push(more(key, 'Details', h('p', {}, a.detail)));
   } else {
-    const cls = a.title;
-    ic = classIcon(cls); title = shortName(cls);
+    const cls = a.title, m = cls.match(/chain\.(.+?)(\.distributed)?$/);
+    title = shortName(cls);
     if (cls.startsWith('lateral.') || cls.startsWith('c2.')) { title = 'A device inside is misbehaving'; gist = 'It acts like an attacker. afw is watching it, not blocking it.'; }
-    else if (!cls.includes('chain')) gist = className(cls) + '.';
+    if (m) extra.push(pathOf(m[1].split('-').map(p => ({ ic: (STAGE[p] || ['question'])[0], name: (STAGE[p] || [0, p])[1] }))));
     const srcs = (a.sources || []).filter(s => s !== '0.0.0.0/0');
-    extra.push(chainSteps(cls, a.level));
-    if (srcs.length) extra.push(h('div', { class: 'row' }, srcs.slice(0, 5).map(addrChip), srcs.length > 5 ? h('span', { class: 'dim' }, '+' + (srcs.length - 5)) : null, a.since ? h('span', { class: 'dim' }, 'since ' + when(a.since)) : null));
-    extra.push(details(key, 'What afw is asking', h('p', {}, tidy(a.detail))));
+    extra.push(h('div', { class: 'meta' }, srcs.slice(0, 5).map(addr), srcs.length > 5 ? '+' + (srcs.length - 5) + ' more' : null, a.since ? 'since ' + when(a.since) : null));
+    extra.push(more(key, 'What afw is asking', h('p', {}, tidy(a.detail))));
   }
-  return h('div', { class: 'need t-' + a.level }, dot(ic, a.level), h('h3', {}, title), acts.length ? h('div', { class: 'acts' }, acts) : null,
-    gist ? h('p', { class: 'gist' }, gist) : null, h('div', { class: 'extra' }, extra));
+  return h('div', { class: 'need is-' + a.level }, h('div', { class: 'body' }, h('h3', {}, mark(a.level), title), gist ? h('p', { class: 'gist' }, gist) : null, extra),
+    acts.length ? h('div', { class: 'acts' }, acts) : null);
 }
-function countdown(since, until, tone) {
-  const end = new Date(until) - 0, start = new Date(since) - 0, now = Date.now();
-  const total = start > 0 && end > start ? end - start : 0, left = Math.max(0, end - now);
-  const pct = total ? Math.max(3, Math.min(100, 100 * left / total)) : 100;
-  const fill = h('i'); fill.style.width = pct + '%';
-  return [h('div', { class: 'track t-' + tone, role: 'img', 'aria-label': span(left) + ' left' }, fill), left];
+function leftPct(since, until) {
+  const end = new Date(until) - 0, start = new Date(since) - 0, left = Math.max(0, end - Date.now());
+  return [start > 0 && end > start ? Math.max(2, Math.min(100, 100 * left / (end - start))) : 100, left];
 }
 function viewNow() {
   const st = S.st;
   if (!st) return h('p', { class: 'loading' }, 'afw is loading.');
-  const out = [], ro = st.read_only, would = st.mode !== 'enforce';
-  if (S.flash) out.push(h('div', { class: 'banner', role: 'status' }, S.flash));
-  const urgent = st.attention.filter(a => a.level === 'act').length;
+  const out = [], ro = st.read_only, would = st.mode !== 'enforce', n = st.attention.length;
+  if (S.flash) out.push(h('p', { class: 'say', role: 'status' }, S.flash));
+  const urgent = st.attention.some(a => a.level === 'act');
   const blocked = st.restricted.filter(r => r.action === 'drop').length, slowed = st.restricted.length - blocked;
+  let tone = 'ok', word = 'All clear.';
+  if (st.posture === 'breakglass') { tone = 'bad'; word = 'Under attack.'; }
+  else if (n) { tone = urgent ? 'bad' : 'warn'; word = n === 1 ? 'One thing needs you.' : n + ' things need you.'; }
+  else if (would) { tone = 'idle'; word = 'Watching only.'; }
+  out.push(h('h1', { class: 'state is-' + tone }, mark(tone, 'big'), h('span', { class: 'word' }, word)));
+  const fig = (v, label, t, href) => h('a', { class: 'is-' + t + (v ? '' : ' zero'), href }, mark(v ? t : 'off', would && v ? 'would' : ''), h('b', {}, num(v)), h('span', {}, label));
+  out.push(h('div', { class: 'tally' },
+    fig(blocked, would ? 'would block' : 'blocked', 'drop', '#/activity?show=drop'), fig(slowed, would ? 'would slow' : 'slowed', 'throttle', '#/activity?show=throttle'), fig(st.watching, 'watched', 'observe', '#/activity?show=observe'),
+    h('span', { class: 'mode mute' }, st.posture === 'breakglass' ? 'Emergency mode: known users first' : would ? 'Blocking is off' : 'Blocking is on',
+      would && !ro ? twoStep('mode:enforce', 'Start blocking', 'Yes, start', () => act({ action: 'mode', value: 'enforce' }, 'Blocking is on.')) : null)));
 
-  let tone = 'ok', ic = 'check', word = 'All clear', sub = 'Blocking is on', btn = null, live = false;
-  if (st.posture === 'breakglass') { tone = 'bad'; ic = 'bolt'; word = 'Under attack'; sub = 'Emergency mode: known users first'; live = true; }
-  else if (st.attention.length) { const n = st.attention.length; tone = urgent ? 'bad' : 'warn'; ic = 'alert'; word = n + (n === 1 ? ' thing needs you' : ' things need you'); sub = would ? 'Watch-only: nothing is being blocked' : 'Blocking is on'; live = urgent > 0; }
-  else if (would) { tone = 'idle'; ic = 'eye'; word = 'Watching only'; sub = 'Nothing is being blocked'; }
-  if (would && !ro) btn = twoStep('mode:enforce', 'Start blocking', 'Yes, start', () => act({ action: 'mode', value: 'enforce' }, 'Blocking is on.'), 'primary');
-  out.push(h('section', { class: 'hero t-' + tone + (live ? ' live' : '') }, h('div', { class: 'ring' }, icon(ic)),
-    h('div', {}, h('div', { class: 'word' }, word), h('div', { class: 'sub' }, sub)), btn ? h('div', { class: 'do' }, btn) : null));
-
-  const tile = (n, label, tone2, ic2, href) => h('a', { class: 'tile t-' + tone2 + (n ? '' : ' zero'), href }, dot(ic2, n ? tone2 : 'idle'),
-    h('div', {}, h('div', { class: 'num' }, num(n)), h('div', { class: 'lab' }, label)));
-  out.push(h('section', { class: 'tiles', 'aria-label': 'Right now' },
-    tile(blocked, would ? 'would block' : 'blocked now', 'drop', 'ban', '#/activity?show=drop'),
-    tile(slowed, would ? 'would slow' : 'slowed now', 'throttle', 'slow', '#/activity?show=throttle'),
-    tile(st.watching, 'being watched', 'observe', 'eye', '#/activity?show=observe')));
-
-  const p = st.pulse, tot = p.blocked.map((b, i) => b + p.slowed[i] + p.watched[i]), peak = Math.max(1, ...tot), sum = tot.reduce((a, b) => a + b, 0);
-  out.push(h('section', { class: 'pulse' },
-    h('div', { class: 'head' }, h('span', {}, 'Last hour'), h('span', {}, sum ? plural(sum, 'decision', 'decisions') : 'quiet')),
-    h('div', { class: 'bars', role: 'img', 'aria-label': 'Decisions per minute over the last hour: ' + sum + ' in total' }, tot.map((t, i) => {
+  const p = st.pulse, tot = p.blocked.map((b, i) => b + p.slowed[i] + p.watched[i]), peak = Math.max(1, ...tot), sum = tot.reduce((x, y) => x + y, 0);
+  out.push(h('figure', { class: 'pulse' },
+    h('div', { class: 'bars', role: 'img', 'aria-label': sum + ' decisions in the last hour, per minute' }, tot.map((t, i) => {
       const bar = h('i', { class: p.blocked[i] ? 'b' : p.slowed[i] ? 's' : t ? 'w' : '', title: t ? (59 - i) + ' min ago: ' + [p.blocked[i] && p.blocked[i] + ' blocked', p.slowed[i] && p.slowed[i] + ' slowed', p.watched[i] && p.watched[i] + ' watched'].filter(Boolean).join(', ') : null });
-      bar.style.height = (t ? 18 + 82 * Math.sqrt(t / peak) : 5) + '%';
+      bar.style.height = t ? 22 + 78 * Math.sqrt(t / peak) + '%' : '0';
       return bar;
     })),
-    h('div', { class: 'axis' }, h('span', {}, '60 min ago'), h('span', {}, 'now'))));
+    h('figcaption', {}, h('span', {}, 'an hour ago'), h('span', {}, sum ? plural(sum, 'decision', 'decisions') + ' in the last hour' : 'a quiet hour'), h('span', {}, 'now'))));
 
-  if (st.attention.length) {
-    out.push(h('h2', {}, 'Needs you', h('span', { class: 'n' }, st.attention.length)));
-    st.attention.forEach((a, i) => out.push(needCard(a, i, ro)));
-  }
-  if (st.handled) out.push(h('p', { class: 'dim' }, plural(st.handled, 'more incident', 'more incidents') + ' handled by afw. ', h('a', { href: '#/activity?show=review' }, 'Review')));
+  if (n) { out.push(head('Needs you', n)); st.attention.forEach((a, i) => out.push(needRow(a, i, ro))); }
+  if (st.handled) out.push(h('p', { class: 'lede', }, plural(st.handled, 'more incident', 'more incidents') + ' handled by afw. ', h('a', { href: '#/activity?show=review' }, 'Review them')));
 
-  out.push(h('h2', {}, would ? 'Would be restricted' : 'Restricted now', st.restricted.length ? h('span', { class: 'n' }, st.restricted.length) : null));
-  if (!st.restricted.length) out.push(empty('check', 'ok', 'Nothing is restricted.'));
-  else out.push(h('div', { class: 'rgrid' }, st.restricted.map(r => {
-    const [bar, left] = countdown(r.since, r.until, r.action);
-    return h('div', { class: 'rc t-' + r.action },
-      h('button', { class: 'rc-main', 'data-k': 'src:' + r.subject, 'aria-label': r.subject + ', ' + actWord(r.action, st.mode) + ', ' + shortName(r.class), onclick: e => openSource(r.subject, e.currentTarget) },
-        dot(classIcon(r.class), r.action, would ? 'would' : ''), h('span', {}, h('span', { class: 'who' }, r.subject), h('span', { class: 'what' }, shortName(r.class)))),
-      bar,
-      h('div', { class: 'rc-foot' }, h('span', {}, h('b', {}, actWord(r.action, st.mode)), ' · ' + span(left) + ' left'),
-        ro || would ? null : h('span', { class: 'row' }, twoStep('unblock:' + r.subject, 'Unblock', 'Unblock 1 h', () => act({ action: 'unblock', subject: r.subject }, r.subject + ' unblocked for an hour.'), 'small'))));
+  out.push(head(would ? 'Would be restricted' : 'Restricted now', st.restricted.length || ''));
+  if (!st.restricted.length) out.push(none('Nothing is restricted.'));
+  else out.push(h('div', { class: 'rows restricted' }, st.restricted.map(r => {
+    const [pct, left] = leftPct(r.since, r.until);
+    const row = h('div', { class: 'row timed is-' + r.action },
+      mark(r.action, would ? 'would' : ''), addr(r.subject), kind(r.class),
+      h('span', { class: 'left num mute' }, span(left) + ' left'),
+      h('span', { class: 'undo acts' }, ro || would ? null : twoStep('unblock:' + r.subject, 'Unblock', 'Unblock 1 h', () => act({ action: 'unblock', subject: r.subject }, r.subject + ' unblocked for an hour.'), 'text')));
+    row.style.setProperty('--left', pct + '%');
+    return row;
   })));
   return out;
 }
 
 // ---- Activity --------------------------------------------------------------
-const SHOW = [['', 'All', ''], ['drop', 'Blocked', 'drop'], ['throttle', 'Slowed', 'throttle'], ['observe', 'Watching', 'observe'], ['review', 'To review', 'check']];
+const SHOW = [['', 'All', ''], ['drop', 'Blocked', 'drop'], ['throttle', 'Slowed', 'throttle'], ['observe', 'Watching', 'observe'], ['review', 'Unsure', '']];
 function shellActivity() {
   let timer;
   const a = S.act, want = route().params.get('show');
   if (want != null && SHOW.some(x => x[0] === want)) { a.show = want; a.pages = 1; }
-  return [h('div', { class: 'chips' }, h('span', { class: 'group', id: 'filters', role: 'group', 'aria-label': 'Show' }),
+  return [h('div', { class: 'picks' }, h('span', { class: 'group', id: 'filters', role: 'group', 'aria-label': 'Show' }),
     h('input', { type: 'search', id: 'find', 'aria-label': 'Find an address', placeholder: 'Find an address', value: a.q,
       oninput: e => { clearTimeout(timer); const v = e.target.value.trim(); timer = setTimeout(() => { a.q = v; a.pages = 1; loadActivity(); }, 300); } })),
   h('div', { id: 'act' })];
@@ -333,8 +288,8 @@ async function loadActivity(older) {
   try { const r = await api('/api/activity?' + p); a.items = older ? a.items.concat(r.items) : r.items; a.more = r.more; if (older) a.pages++; } catch (e) { /* the header says afw is unreachable */ }
   render();
 }
-// One attacker usually climbs a ladder: watched, then slowed, then blocked.
-// The list shows where each one ended up; the steps are in its history.
+// One attacker usually climbs: watched, then slowed, then blocked. The list
+// shows where each one ended up; the steps are in its history.
 function steps(items) {
   const out = [];
   for (const d of items) {
@@ -344,31 +299,24 @@ function steps(items) {
   }
   return out;
 }
-function ladder(action) {
-  const lvl = { observe: 1, throttle: 2, drop: 3 }[action] || 0;
-  return h('span', { class: 'ladder', role: 'img', 'aria-label': 'level ' + lvl + ' of 3' }, ['w', 's', 'b'].map((c, i) => h('i', { class: i < lvl ? 'on ' + (lvl === 3 ? 'b' : lvl === 2 ? 's' : 'w') : '' })));
-}
 function viewActivity() {
   const a = S.act, mode = S.st ? S.st.mode : 'enforce';
-  paint($('filters'), a.show, () => SHOW.map(([id, name, tone]) => h('button', { class: 'fchip' + (id ? ' t-' + tone : ' all'), 'aria-pressed': String(a.show === id), 'data-k': 'show:' + id, onclick: () => { a.show = id; a.pages = 1; loadActivity(); } }, name)));
+  paint($('filters'), a.show, () => SHOW.map(([id, name, tone]) => h('button', { class: 'pick' + (tone ? ' is-' + tone : ''), 'aria-pressed': String(a.show === id), 'data-k': 'show:' + id, onclick: () => { a.show = id; a.pages = 1; loadActivity(); } }, tone ? mark(tone) : null, name)));
   paint($('act'), JSON.stringify([a.items.length, a.items[0], a.items[a.items.length - 1], a.more, a.pages, mode]), () => {
     if (!a.items.length) return a.q || a.show
-      ? empty('q', 'idle', 'Nothing matches.', h('button', { onclick: () => { a.q = ''; a.show = ''; $('find').value = ''; loadActivity(); } }, 'Clear filters'))
-      : empty('check', 'ok', 'No decisions yet.', h('p', { class: 'dim' }, 'They appear the moment something suspicious happens.'));
-    const out = [a.pages > 1 ? h('p', { class: 'dim' }, 'Showing older decisions. ', h('button', { class: 'quiet', onclick: () => { a.pages = 1; loadActivity(); } }, 'Back to latest')) : null];
+      ? none('Nothing matches. ', h('button', { class: 'text', onclick: () => { a.q = ''; a.show = ''; $('find').value = ''; loadActivity(); } }, 'Clear filters'))
+      : none('No decisions yet. They appear the moment something suspicious happens.');
+    const out = [a.pages > 1 ? h('p', { class: 'lede' }, 'Showing older decisions. ', h('button', { class: 'text', onclick: () => { a.pages = 1; loadActivity(); } }, 'Back to latest')) : null];
     let day = null, list = null;
-    for (const { d, review } of steps(a.items)) {
+    for (const { d } of steps(a.items)) {
       const name = dayName(d.ts);
-      if (name !== day) { day = name; out.push(h('div', { class: 'day' }, name)); list = h('ul', { class: 'tl' }); out.push(list); }
-      const w = isWould(d.action, d.mode);
-      list.append(h('li', {}, h('button', { class: 'ev', 'data-k': 'dec:' + d.id, 'aria-label': clock(new Date(d.ts)) + ', ' + d.subject + ', ' + actWord(d.action, d.mode) + ', ' + shortName(d.class), onclick: e => openSource(d.subject, e.currentTarget) },
-        h('span', { class: 'time' }, clock(new Date(d.ts))),
-        dot(classIcon(d.class), d.action, w ? 'would' : ''),
-        h('span', {}, h('span', { class: 'who' }, d.subject), h('span', { class: 'what' }, h('b', { class: 't-' + d.action + ' txt' }, actWord(d.action, d.mode)), ' · ' + shortName(d.class))),
-        h('span', { class: 'side' }, review ? h('span', { class: 'flagme', title: 'afw was not fully sure: worth a second look' }, icon('q')) : null,
-          d.action !== 'allow' && d.action !== 'observe' && d.ttl ? h('span', { class: 'ttl' }, ttlWords(d.ttl)) : null, ladder(d.action)))));
+      if (name !== day) { day = name; out.push(h('h2', { class: 'day' }, name)); list = h('div', { class: 'rows activity' }); out.push(list); }
+      list.append(h('button', { class: 'row is-' + d.action, 'data-k': 'dec:' + d.id, 'aria-label': clock(new Date(d.ts)) + ', ' + d.subject + ', ' + actWord(d.action, d.mode) + ', ' + shortName(d.class), onclick: e => openSource(d.subject, e.currentTarget) },
+        h('span', { class: 'num mute' }, clock(new Date(d.ts))), mark(d.action, isWould(d.action, d.mode) ? 'would' : ''),
+        h('span', { class: 'addr clip' }, d.subject), kind(d.class),
+        h('span', { class: 'end num mute' }, d.action !== 'allow' && d.action !== 'observe' && d.ttl ? ttlWords(d.ttl) : '')));
     }
-    if (a.more) out.push(h('div', { class: 'row' }, h('button', { 'data-k': 'older', onclick: () => loadActivity(true) }, 'Show older')));
+    if (a.more) out.push(h('p', { class: 'lede' }, h('button', { 'data-k': 'older', onclick: () => loadActivity(true) }, 'Show older')));
     return out;
   });
 }
@@ -380,34 +328,29 @@ function viewCoverage() {
   const fams = [];
   for (const row of c.attack_universe) { let f = fams.find(x => x.name === row.family); if (!f) fams.push(f = { name: row.family, rows: [] }); f.rows.push(row); }
   const tone = r => r.see === 'no' || r.act === 'no' ? 'no' : r.see === 'yes' && r.act === 'yes' ? 'yes' : 'partial';
-  const all = c.attack_universe, gaps = all.filter(r => tone(r) === 'no').length, part = all.filter(r => tone(r) === 'partial').length;
-  const pick = all.find(r => r.class === S.cell);
-  const WORD = { yes: 'afw sees and stops this.', partial: 'afw handles this only partly.', no: 'afw cannot stop this on its own.' };
-  const max = Math.max(1, ...c.assets.map(a => a.flows_last_hour));
+  const all = c.attack_universe, count = t => all.filter(r => tone(r) === t).length, pick = all.find(r => r.class === S.cell);
+  const WORD = { yes: 'afw sees this and stops it.', partial: 'afw handles this only partly.', no: 'afw cannot stop this on its own.' };
   const hit = a => Object.keys(a.classes || {}).length ? 1 : 0;
   const ranked = c.assets.filter(a => a.flows_last_hour || hit(a)).sort((x, y) => hit(y) - hit(x) || y.flows_last_hour - x.flows_last_hour);
-  const assets = ranked.slice(0, S.allAssets ? 500 : 6);
+  const assets = ranked.slice(0, S.allAssets ? 500 : 6), max = Math.max(1, ...ranked.map(a => a.flows_last_hour));
   return [
-    h('h2', {}, 'Attack map'),
-    h('div', { class: 'card' },
-      fams.map(f => h('div', { class: 'fam' }, h('div', { class: 'name' }, cap(f.name)), h('div', { class: 'cells' }, f.rows.map(r =>
-        h('button', { class: 'cell t-' + tone(r) + (r.seen ? ' seen' : ''), 'aria-pressed': String(S.cell === r.class), 'data-k': 'cell:' + r.class, title: className(r.class),
-          'aria-label': className(r.class) + '. ' + WORD[tone(r)] + (r.seen ? ' Seen here ' + r.seen + ' times.' : ''), onclick: () => { S.cell = S.cell === r.class ? null : r.class; repaint(); } },
-        icon(classIcon(r.class)), r.seen ? h('span', { class: 'badge' }, r.seen > 99 ? '99+' : r.seen) : null))))),
-      h('div', { class: 'legend' }, h('span', { class: 't-yes' }, h('i'), 'handled'), h('span', { class: 't-partial' }, h('i'), plural(part, 'partly', 'partly')), h('span', { class: 't-no' }, h('i'), plural(gaps, 'gap', 'gaps')), h('span', {}, 'number = times seen here')),
-      pick ? h('div', { class: 'picked t-' + tone(pick) }, dot(classIcon(pick.class), tone(pick)), h('div', {}, h('h3', {}, className(pick.class)),
-        h('p', { class: 'sec' }, WORD[tone(pick)] + ' ' + (pick.seen ? 'Seen here ' + plural(pick.seen, 'time', 'times') + '.' : pick.see === 'no' ? 'afw could not tell if it happened here.' : 'Not seen here yet.'))))
-        : h('p', { class: 'dim picked' }, 'Tap a square to see what it is.')),
+    h('h1', { class: 'state is-' + (count('no') ? 'bad' : 'ok') }, h('span', { class: 'word' }, count('no') + ' gaps'), h('span', {}, 'in ' + all.length + ' attack types.')),
+    h('p', { class: 'lede' }, 'One square per attack type. A number is how often it has been seen here.'),
+    h('div', { class: 'heat' }, fams.map(f => [h('div', { class: 'fam' }, cap(f.name)), h('div', { class: 'cells' }, f.rows.map(r =>
+      h('button', { class: 'cell is-' + tone(r) + (r.seen ? ' seen' : ''), 'aria-pressed': String(S.cell === r.class), 'data-k': 'cell:' + r.class, title: className(r.class),
+        'aria-label': className(r.class) + '. ' + WORD[tone(r)] + (r.seen ? ' Seen here ' + r.seen + ' times.' : ''), onclick: () => { S.cell = S.cell === r.class ? null : r.class; repaint(); } }, r.seen ? (r.seen > 99 ? '99+' : r.seen) : null)))])),
+    h('div', { class: 'key' }, h('span', { class: 'is-yes' }, mark('yes'), count('yes') + ' handled'), h('span', { class: 'is-partial' }, mark('partial'), count('partial') + ' partly'), h('span', { class: 'is-no' }, mark('no'), count('no') + ' gaps')),
+    h('div', { class: 'picked' }, pick ? [h('h3', { class: 'tone is-' + tone(pick) }, className(pick.class)), h('p', { class: 'mute' }, WORD[tone(pick)] + ' ' + (pick.seen ? 'Seen here ' + plural(pick.seen, 'time', 'times') + '.' : pick.see === 'no' ? 'afw could not tell if it happened here.' : 'Not seen here yet.'))]
+      : h('p', { class: 'mute' }, 'Pick a square to see what it is.')),
 
-    h('h2', {}, 'Most targeted'),
-    !assets.length ? empty('check', 'ok', 'Nothing has been targeted yet.') : h('div', { class: 'card' }, assets.map(a => {
-      const [name, where] = assetLabel(a.asset), kinds = Object.keys(a.classes || {});
-      const fill = h('i'); fill.style.width = Math.max(2, 100 * a.flows_last_hour / max) + '%';
-      return h('div', { class: 'hbar t-' + (kinds.length ? 'drop' : 'observe') },
-        h('div', { class: 'lab' }, name, h('small', {}, [where, kinds.length ? kinds.map(shortName).filter((v, i, x) => x.indexOf(v) === i).join(', ') : 'no attacks'].filter(Boolean).join(' · '))),
-        h('div', { class: 'track', role: 'img', 'aria-label': a.flows_last_hour + ' connections in the last hour' }, fill), h('div', { class: 'n' }, num(a.flows_last_hour)));
-    }), h('p', { class: 'dim' }, 'Connections in the last hour. Red means attacks were seen there.'),
-    ranked.length > assets.length && !S.allAssets ? h('button', { class: 'quiet', onclick: () => { S.allAssets = true; repaint(); } }, 'Show all') : null),
+    head('Most targeted', 'connections in the last hour'),
+    !assets.length ? none('Nothing has been targeted yet.') : h('div', { class: 'rows targets' }, assets.map(a => {
+      const [name, where] = assetLabel(a.asset), kinds = Object.keys(a.classes || {}).map(shortName).filter((v, i, x) => x.indexOf(v) === i);
+      const fill = h('i'); fill.style.width = Math.max(1, 100 * a.flows_last_hour / max) + '%';
+      return h('div', { class: 'row is-' + (kinds.length ? 'drop' : 'observe') }, h('span', { class: 'who' }, name, h('small', {}, [where, kinds.join(', ')].filter(Boolean).join(' \u00b7 '))),
+        h('div', { class: 'bar', role: 'img', 'aria-label': a.flows_last_hour + ' connections' }, fill), h('b', { class: 'end num' }, num(a.flows_last_hour)));
+    })),
+    ranked.length > assets.length && !S.allAssets ? h('p', { class: 'lede' }, h('button', { class: 'text', onclick: () => { S.allAssets = true; repaint(); } }, 'Show all ' + ranked.length)) : null,
   ];
 }
 
@@ -417,57 +360,58 @@ function viewSystem() {
   const y = S.sys, st = S.st;
   if (!y || !st) return h('p', { class: 'loading' }, 'Loading system details.');
   const s = y.status, ro = st.read_only, out = [];
-  if (S.flash) out.push(h('div', { class: 'banner', role: 'status' }, S.flash));
+  if (S.flash) out.push(h('p', { class: 'say', role: 'status' }, S.flash));
   const sens = s.sensors, enf = s.enforcer || {}, press = (s.engine || {}).pressure || {}, dec = s.decoys, adv = s.adviser || {}, x = s.crosstalk || {}, feeds = s.feeds || [];
   const badFeeds = feeds.filter(f => f.error && f.error !== 'not loaded yet').length;
-  const light = (name, tone, state, ...more) => h('div', { class: 'light t-' + tone }, h('div', { class: 'head' }, h('span', { class: 'lamp' }), h('span', { class: 'name' }, name)),
-    h('div', { class: 'state' }, state), more.filter(Boolean).length ? details('light:' + name, 'Details', more) : null);
-  const line = t => h('p', {}, t);
-  out.push(h('h2', {}, 'Health'), h('div', { class: 'lights' },
-    light('Sensors', !sens ? 'off' : sens.overflow ? 'warn' : 'ok', !sens ? 'Simulated traffic' : sens.overflow ? 'Overloaded at some point' : 'Seeing traffic',
-      sens ? line(num(sens.nflog_packets) + ' connections sampled, ' + num(sens.conntrack_events) + ' events' + (sens.overflow ? ', ' + num(sens.overflow) + ' missed' : '') + '.') : null,
-      line(num(Math.round(press.NewPerSec || 0)) + ' new connections a second right now' + (s.posture && s.posture.baseline_per_sec >= 1 ? ' (usual: ' + num(Math.round(s.posture.baseline_per_sec)) + ')' : '') + '.')),
-    light('Firewall rules', s.enforcer_error ? 'bad' : st.mode === 'enforce' ? 'ok' : 'off', s.enforcer_error ? 'Cannot read its rules' : st.mode === 'enforce' ? 'Installed' : 'Watch-only: none installed',
-      s.enforcer_error ? line(s.enforcer_error) : line('Stopped so far: ' + num(enf.drop_verdict_packets) + ' packets from blocked sources, ' + num(enf.drop_reputation_packets) + ' from threat lists, ' + num(enf.drop_egress_packets) + ' outgoing to known-bad addresses, ' + num(enf.throttled_packets) + ' slowed.')),
-    light('Threat lists', !feeds.length ? 'off' : badFeeds ? 'warn' : 'ok', !feeds.length ? 'None set up' : badFeeds ? badFeeds + ' failed to update' : feeds.length + ' up to date',
-      feeds.map(f => line(f.name + ' (' + (FEED[f.action] || f.action) + '): ' + num(f.entries) + ' entries' + (f.error ? '. ' + f.error : f.updated ? ', updated ' + when(f.updated) : '') + '.'))),
-    light('Decoys', !dec ? 'off' : (dec.ports || []).length ? 'ok' : 'warn', !dec ? 'Off' : (dec.ports || []).length ? plural(dec.touches, 'touch', 'touches') : 'No port could be opened',
-      dec ? line('Listening on ' + ((dec.ports || []).join(', ') || 'nothing') + '. ' + num(dec.held_now) + ' held right now.' + (dec.skipped ? ' ' + dec.skipped + ' skipped: something real uses them.' : '')) : line('List unused ports under canary in the config.')),
-    light('AI adviser', !adv.door ? 'off' : adv.suspended ? 'bad' : 'ok', !adv.door ? 'Not connected' : adv.suspended ? 'Suspended' : 'Connected',
-      adv.door ? line(num(adv.accepted) + ' suggestions heard, ' + num(adv.refused) + ' refused, ' + plural(adv.strikes, 'strike', 'strikes') + '.') : line('afw works without one.')),
-    light('Other afw nodes', y.peers ? 'ok' : 'off', y.peers ? plural(y.peers, 'node', 'nodes') + ' linked' : 'None linked',
-      y.peers ? line(num(x.accepted) + ' warnings received, ' + num(x.rejected) + ' rejected, ' + num(x.sent) + ' sent.') : null),
-    light('Safety limit', s.budget_denied ? 'warn' : 'ok', s.budget_denied ? plural(s.budget_denied, 'action', 'actions') + ' held back' : 'Never reached'),
-    light('Record', s.journal_dropped ? 'warn' : 'ok', s.journal_dropped ? num(s.journal_dropped) + ' lines dropped' : 'Complete', h('p', { class: 'mono' }, y.log_path))));
+  const parts = [
+    ['Sensors', !sens ? 'off' : sens.overflow ? 'warn' : 'ok', !sens ? 'Simulated traffic' : sens.overflow ? 'Overloaded at some point' : 'Seeing traffic',
+      [sens ? num(sens.nflog_packets) + ' connections sampled, ' + num(sens.conntrack_events) + ' events' + (sens.overflow ? ', ' + num(sens.overflow) + ' missed' : '') + '.' : null,
+        num(Math.round(press.NewPerSec || 0)) + ' new connections a second right now' + (s.posture && s.posture.baseline_per_sec >= 1 ? ' (usual: ' + num(Math.round(s.posture.baseline_per_sec)) + ')' : '') + '.']],
+    ['Firewall rules', s.enforcer_error ? 'bad' : st.mode === 'enforce' ? 'ok' : 'off', s.enforcer_error ? 'Cannot read its own rules' : st.mode === 'enforce' ? 'Installed' : 'None installed (watch-only)',
+      [s.enforcer_error || 'Stopped so far: ' + num(enf.drop_verdict_packets) + ' packets from blocked sources, ' + num(enf.drop_reputation_packets) + ' from threat lists, ' + num(enf.drop_egress_packets) + ' outgoing to known-bad addresses, ' + num(enf.throttled_packets) + ' slowed.']],
+    ['Threat lists', !feeds.length ? 'off' : badFeeds ? 'warn' : 'ok', !feeds.length ? 'None set up' : badFeeds ? badFeeds + ' failed to update' : feeds.length + ' up to date',
+      feeds.map(f => f.name + ' (' + (FEED[f.action] || f.action) + '): ' + num(f.entries) + ' entries' + (f.error ? '. ' + f.error : f.updated ? ', updated ' + when(f.updated) : '') + '.')],
+    ['Decoys', !dec ? 'off' : (dec.ports || []).length ? 'ok' : 'warn', !dec ? 'Off' : (dec.ports || []).length ? plural(dec.touches, 'touch', 'touches') + ' on ' + dec.ports.length + ' ports' : 'No port could be opened',
+      [dec ? 'Listening on ' + ((dec.ports || []).join(', ') || 'nothing') + '. ' + num(dec.held_now) + ' held right now.' + (dec.skipped ? ' ' + dec.skipped + ' skipped: something real uses them.' : '') : 'List unused ports under canary in the config.']],
+    ['AI adviser', !adv.door ? 'off' : adv.suspended ? 'bad' : 'ok', !adv.door ? 'Not connected' : adv.suspended ? 'Suspended' : 'Connected',
+      [adv.door ? num(adv.accepted) + ' suggestions heard, ' + num(adv.refused) + ' refused, ' + plural(adv.strikes, 'strike', 'strikes') + '.' : 'afw works without one.']],
+    ['Other afw nodes', y.peers ? 'ok' : 'off', y.peers ? plural(y.peers, 'node', 'nodes') + ' linked' : 'None linked', y.peers ? [num(x.accepted) + ' warnings received, ' + num(x.rejected) + ' rejected, ' + num(x.sent) + ' sent.'] : []],
+    ['Safety limit', s.budget_denied ? 'warn' : 'ok', s.budget_denied ? plural(s.budget_denied, 'action', 'actions') + ' held back' : 'Never reached', []],
+    ['Record', s.journal_dropped ? 'warn' : 'ok', s.journal_dropped ? num(s.journal_dropped) + ' lines dropped' : 'Complete', [y.log_path]],
+  ];
+  const wrong = parts.filter(p => p[1] === 'bad' || p[1] === 'warn').length;
+  out.push(h('h1', { class: 'state is-' + (wrong ? 'warn' : 'ok') }, mark(wrong ? 'warn' : 'ok', 'big'), h('span', { class: 'word' }, wrong ? (wrong === 1 ? 'One part needs a look.' : wrong + ' parts need a look.') : 'afw is healthy.')));
+  out.push(head('Parts'), h('div', { class: 'rows health' }, parts.map(([name, tone, state, lines]) => h('div', { class: 'row is-' + tone }, mark(tone), h('b', {}, name),
+    h('span', { class: 'more' }, lines.filter(Boolean).length ? more('part:' + name, state, lines.filter(Boolean).map(t => h('p', {}, t))) : h('span', { class: 'mute' }, state))))));
 
-  out.push(h('h2', {}, 'Never blocked'), (s.protected || []).length ? h('div', { class: 'row' }, s.protected.map(p => h('span', { class: 'addr' }, p.replace(/\/(32|128)$/, ''))))
-    : h('p', { class: 'amber' }, 'Nothing is protected. Add your router and admin machine to the config.'));
+  out.push(head('Never blocked'), (s.protected || []).length ? h('p', { class: 'none' }, s.protected.map((p, i) => [i ? ', ' : null, h('span', { class: 'addr' }, p.replace(/\/(32|128)$/, ''))]))
+    : none('Nothing is protected. Add your router and admin machine to the config.'));
 
-  out.push(h('h2', {}, 'Controls'));
-  if (ro) out.push(h('p', { class: 'dim' }, 'Read-only here. Controls are only on the machine itself.'));
+  out.push(head('Controls'));
+  if (ro) out.push(none('Read-only here. Controls are only on the machine itself.'));
   else {
-    const sw = (key, on, name, hint, toneOn, turnOn, turnOff) => h('div', { class: 'ctl' }, h('div', { class: 'txt' }, h('b', {}, name), h('span', {}, hint)),
-      S.armed === key ? [h('button', { class: 'primary', 'data-k': key, onclick: on ? turnOff : turnOn }, on ? 'Yes, turn off' : 'Yes, turn on'), h('button', { 'data-k': key + ':no', onclick: () => { S.armed = null; repaint(); } }, 'Cancel')]
-        : h('button', { class: 'switch t-' + toneOn, role: 'switch', 'aria-checked': String(on), 'aria-label': name, 'data-k': key, onclick: () => { S.armed = key; repaint(); } }));
+    const sw = (key, on, name, hint, turnOn, turnOff) => h('div', { class: 'ctl' }, h('b', {}, name), h('p', {}, hint), h('div', { class: 'acts' },
+      S.armed === key ? [h('button', { class: 'go', 'data-k': key, onclick: on ? turnOff : turnOn }, on ? 'Yes, turn off' : 'Yes, turn on'), h('button', { class: 'text', 'data-k': key + ':no', onclick: () => { S.armed = null; repaint(); } }, 'Cancel')]
+        : h('button', { class: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': name, 'data-k': key, onclick: () => { S.armed = key; repaint(); } })));
     out.push(
-      sw('sw:block', st.mode === 'enforce', 'Blocking', st.mode === 'enforce' ? 'afw acts on what it sees.' : 'afw only records what it would do.', 'ok',
+      sw('sw:block', st.mode === 'enforce', 'Blocking', st.mode === 'enforce' ? 'afw acts on what it sees.' : 'afw only records what it would do.',
         () => act({ action: 'mode', value: 'enforce' }, 'Blocking is on.'), () => act({ action: 'mode', value: 'shadow' }, 'Watch-only. Nothing is blocked.')),
-      sw('sw:bg', st.posture === 'breakglass', 'Emergency mode', 'For a flood: known users first, everyone else limited. afw turns it on by itself.', 'bad',
+      sw('sw:bg', st.posture === 'breakglass', 'Emergency mode', 'For a flood: known users first, everyone else limited. afw turns it on by itself.',
         () => act({ action: 'breakglass', value: 'on' }, 'Emergency mode is on for an hour.'), () => act({ action: 'breakglass', value: 'off' }, 'Emergency mode is off.')),
-      h('div', { class: 'ctl' }, h('div', { class: 'txt' }, h('b', {}, 'Off switch'), h('span', {}, S.armed === 'panic' ? 'Deletes every afw rule and stops afw. Type remove to confirm.' : 'Removes everything afw put in the firewall and stops it.')),
-        S.armed === 'panic' ? [h('input', { type: 'text', id: 'sure', 'aria-label': 'Type remove to confirm', autocomplete: 'off', 'data-k': 'sure', placeholder: 'remove' }),
-          h('button', { class: 'danger', 'data-k': 'panic', onclick: () => { if ($('sure').value.trim().toLowerCase() === 'remove') act({ action: 'panic' }, 'afw removed its rules and stopped.'); else $('sure').focus(); } }, 'Remove'),
-          h('button', { onclick: () => { S.armed = null; repaint(); } }, 'Cancel')]
-          : h('button', { class: 'danger', 'data-k': 'panic', onclick: () => { S.armed = 'panic'; repaint(); } }, 'Remove all rules')));
+      h('div', { class: 'ctl' }, h('b', {}, 'Off switch'), h('p', {}, S.armed === 'panic' ? 'Deletes every afw rule and stops afw. Type remove to confirm.' : 'Removes everything afw put in the firewall and stops it.'),
+        h('div', { class: 'acts' }, S.armed === 'panic' ? [h('input', { type: 'text', id: 'sure', 'aria-label': 'Type remove to confirm', autocomplete: 'off', 'data-k': 'sure', placeholder: 'remove' }),
+          h('button', { class: 'stop', 'data-k': 'panic', onclick: () => { if ($('sure').value.trim().toLowerCase() === 'remove') act({ action: 'panic' }, 'afw removed its rules and stopped.'); else $('sure').focus(); } }, 'Remove'),
+          h('button', { class: 'text', onclick: () => { S.armed = null; repaint(); } }, 'Cancel')]
+          : h('button', { class: 'stop', 'data-k': 'panic', onclick: () => { S.armed = 'panic'; repaint(); } }, 'Remove all rules'))));
   }
-  out.push(h('p', { class: 'dim' }, s.node + ' · ' + (s.role === 'gateway' ? 'protects the whole network' : 'protects this machine') + ' · up ' + span(Date.now() - new Date(st.started)) + ' · ' + st.version));
+  out.push(h('p', { class: 'foot' }, s.node + ', ' + (s.role === 'gateway' ? 'protecting the whole network' : 'protecting this machine') + ', up ' + span(Date.now() - new Date(st.started)) + ', version ' + st.version));
   return out;
 }
 
 // ---- one source ------------------------------------------------------------
-function openSource(addr, from) {
+function openSource(a, from) {
   opener = from ? from.getAttribute('data-k') : null;
-  const r = route(); r.params.set('s', addr);
+  const r = route(); r.params.set('s', a);
   location.hash = '#/' + r.view + '?' + r.params;
 }
 function closeSource() {
@@ -475,62 +419,57 @@ function closeSource() {
   const qs = r.params.toString();
   location.hash = '#/' + r.view + (qs ? '?' + qs : '');
 }
-async function showSource(addr) {
+async function showSource(a) {
   const p = $('panel');
   let v, err;
-  try { v = await api('/api/source?q=' + encodeURIComponent(addr)); } catch (e) { if (e.message === 'token') return; err = e.message; }
-  if (route().params.get('s') !== addr) return;
+  try { v = await api('/api/source?q=' + encodeURIComponent(a)); } catch (e) { if (e.message === 'token') return; err = e.message; }
+  if (route().params.get('s') !== a) return;
   const st = S.st || {};
-  paint(p, JSON.stringify([addr, v, err, st.mode, st.read_only, S.armed, Math.floor(Date.now() / 30000)]), () => {
-    const close = h('button', { id: 'close', 'data-k': 'close', 'aria-label': 'Close', onclick: closeSource }, icon('x'));
-    if (err) return [h('div', { class: 'phead' }, h('h1', { id: 'panel-title' }, addr), close), empty('q', 'idle', err)];
+  paint(p, JSON.stringify([a, v, err, st.mode, st.read_only, S.armed, Math.floor(Date.now() / 30000)]), () => {
+    const close = h('button', { id: 'close', 'data-k': 'close', 'aria-label': 'Close', onclick: closeSource }, '\u00d7');
+    if (err) return [h('div', { class: 'phead' }, h('h1', { id: 'panel-title' }, a), close), none(err)];
     const r = v.restricted, l = v.latest, would = st.mode !== 'enforce', key = 'punblock:' + v.subject;
-    const tone = r ? r.action : v.protected || v.known_user ? 'ok' : 'idle';
-    const body = [h('div', { class: 'phead t-' + tone }, dot(l ? classIcon(l.class) : r ? 'ban' : 'check', tone),
-      h('h1', { id: 'panel-title' }, v.subject, h('small', {}, r ? actWord(r.action, st.mode) + ' · ' + span(new Date(r.until) - Date.now()) + ' left' : 'Not restricted')), close)];
-    if (r) body.push(countdown(l && l.ts, r.until, r.action)[0]);
-    const badges = [v.protected && ['shield', 'ok', 'Never blocked'], v.known_user && ['user', 'ok', 'Regular user'], v.inside && ['home', 'idle', 'Inside your network']].filter(Boolean);
-    if (badges.length) body.push(h('div', { class: 'badges' }, badges.map(([ic, t, text]) => h('span', { class: 'tag t-' + t }, icon(ic), text))));
-    if (r && st.mode && !st.read_only && !would) body.push(h('div', { class: 'row badges' }, S.armed !== key
-      ? h('button', { 'data-k': key, onclick: () => { S.armed = key; showSource(addr); } }, 'Unblock')
-      : [h('button', { class: 'primary', 'data-k': key, onclick: async () => { await act({ action: 'unblock', subject: v.subject }, v.subject + ' unblocked for an hour.'); showSource(addr); } }, 'Unblock for 1 hour'),
-        h('button', { 'data-k': key + ':no', onclick: () => { S.armed = null; showSource(addr); } }, 'Cancel')]));
-    if (!v.known && !r) body.push(empty('check', 'ok', 'afw has no record of this address.'));
+    const tone = r ? r.action : 'off';
+    const body = [h('div', { class: 'phead' }, h('h1', { id: 'panel-title' }, v.subject), close),
+      h('p', { class: 'pstate is-' + tone }, mark(tone, r && would ? 'would' : ''), r ? [h('b', { class: 'tone' }, actWord(r.action, st.mode)), h('span', {}, span(new Date(r.until) - Date.now()) + ' left')] : h('span', {}, 'Not restricted'))];
+    if (r) { const fill = h('i'); fill.style.width = leftPct(l && l.ts, r.until)[0] + '%'; body.push(h('div', { class: 'bar is-' + r.action }, fill)); }
+    const facts = [v.protected && 'Never blocked', v.known_user && 'Regular user', v.inside && 'Inside your network'].filter(Boolean);
+    if (facts.length) body.push(h('p', { class: 'facts' }, facts.map(t => h('span', { class: 'is-ok' }, mark('ok'), t))));
+    if (r && st.mode && !st.read_only && !would) body.push(h('p', { class: 'acts facts' }, S.armed !== key
+      ? h('button', { 'data-k': key, onclick: () => { S.armed = key; showSource(a); } }, 'Unblock')
+      : [h('button', { class: 'go', 'data-k': key, onclick: async () => { await act({ action: 'unblock', subject: v.subject }, v.subject + ' unblocked for an hour.'); showSource(a); } }, 'Unblock for 1 hour'),
+        h('button', { class: 'text', 'data-k': key + ':no', onclick: () => { S.armed = null; showSource(a); } }, 'Cancel')]));
+    if (!v.known && !r) body.push(none('afw has no record of this address.'));
 
-    // The story: what it did, in order, and how it ended.
     let story = [];
     const chain = l && (l.class || '').match(/chain\.(.+?)(\.distributed)?$/);
-    if (chain) story = chain[1].split('-').map(p => ({ name: (STAGE[p] || [0, p])[1], ic: (STAGE[p] || ['q'])[0] }));
+    if (chain) story = chain[1].split('-').map(x => ({ name: (STAGE[x] || [0, x])[1], ic: (STAGE[x] || ['question'])[0] }));
     else for (const t of v.timeline.filter(t => t.kind === 'decision').reverse()) {
       const name = shortName(t.class);
       if (!story.length || story[story.length - 1].name !== name) story.push({ name, ic: classIcon(t.class) });
     }
-    if (story.length) body.push(h('h2', {}, 'What happened'), h('div', { class: 'steps' },
-      story.slice(-4).map((s, i) => [i ? h('span', { class: 'arrow' }, icon('right')) : null, h('span', { class: 'step' }, h('span', { class: 'dot sm t-idle' }, icon(s.ic)), s.name)]),
-      l ? [h('span', { class: 'arrow' }, icon('right')), h('span', { class: 'step' }, h('span', { class: 'dot sm t-' + l.action }, icon((ACT[l.action] || ['q'])[0])), actWord(l.action, st.mode))] : null));
+    if (story.length) body.push(head('What happened'), pathOf(story.slice(-4).concat(l ? [{ name: actWord(l.action, st.mode), tone: l.action }] : [])));
 
     if (l && (l.signals || []).length) {
       const at = (l.summary || '').indexOf(l.reason), extra = at >= 0 ? l.summary.slice(at + l.reason.length).replace(/^\./, '').trim() : '';
-      body.push(h('h2', {}, 'Evidence'), h('div', { class: 'card' }, l.signals.map(g => {
+      body.push(head('Evidence', 'bar = how much it counted'), h('div', { class: 'rows proof' }, l.signals.map(g => {
         const fill = h('i'); fill.style.width = Math.round(100 * Math.min(1, g.weight)) + '%';
-        return h('div', { class: 'meter t-' + (g.spoofable ? 'throttle' : 'drop') + (g.spoofable ? ' faked' : '') },
-          h('div', { class: 'txt' }, cap(g.detail || g.name), g.spoofable ? h('span', { class: 'faked-tag' }, 'could be faked') : null), h('div', { class: 'track', role: 'img', 'aria-label': 'strength ' + Math.round(g.weight * 100) + ' percent' }, fill));
-      }), extra ? h('p', { class: 'dim' }, extra) : null));
+        return h('div', { class: 'row is-' + (g.spoofable ? 'throttle' : 'drop') }, h('span', {}, cap(g.detail || g.name), g.spoofable ? h('small', {}, 'could be faked') : null),
+          h('div', { class: 'bar' + (g.spoofable ? ' faked' : ''), role: 'img', 'aria-label': Math.round(g.weight * 100) + ' percent' }, fill));
+      })), extra ? h('p', { class: 'lede' }, extra) : null);
     }
-    if (v.timeline.length) body.push(h('h2', {}, 'History'), h('ul', { class: 'hist' }, v.timeline.map(t => h('li', {},
-      h('span', { class: 'time' }, clock(new Date(t.ts))),
-      t.kind === 'decision' ? h('span', { class: 'dot sm t-' + t.action }, icon((ACT[t.action] || ['q'])[0])) : h('span', { class: 'dot sm t-check' }, icon('q')),
-      h('span', { class: 'body' }, t.kind === 'decision'
-        ? [h('b', {}, actWord(t.action, st.mode) + (t.action !== 'allow' && t.action !== 'observe' && t.ttl ? ' for ' + ttlWords(t.ttl) : '')), h('span', {}, t.class ? shortName(t.class) : cap(t.text))]
-        : [h('b', {}, 'Second look asked'), details('q:' + t.ts, 'What afw asked', h('p', {}, tidy(t.text)))])))));
-    if (v.known) body.push(h('p', { class: 'dim' }, 'First seen ' + when(v.first) + ' · last seen ' + when(v.last)));
+    if (v.timeline.length) body.push(head('History'), h('div', { class: 'rows history' }, v.timeline.map(t => h('div', { class: 'row is-' + (t.kind === 'decision' ? t.action : 'off') },
+      h('span', { class: 'num mute' }, clock(new Date(t.ts))), mark(t.kind === 'decision' ? t.action : 'off'),
+      t.kind === 'decision' ? h('span', {}, h('b', {}, actWord(t.action, st.mode) + (t.action !== 'allow' && t.action !== 'observe' && t.ttl ? ' for ' + ttlWords(t.ttl) : '')), h('span', { class: 'mute' }, ' ' + (t.class ? shortName(t.class) : cap(t.text))))
+        : more('q:' + t.ts, 'afw asked for a second look', h('p', {}, tidy(t.text)))))));
+    if (v.known) body.push(h('p', { class: 'foot' }, 'First seen ' + when(v.first) + ', last seen ' + when(v.last) + '.'));
     return body;
   });
   if (p.hidden) { p.hidden = false; $('scrim').hidden = false; $('close').focus(); }
 }
 function syncPanel() {
-  const addr = route().params.get('s'), p = $('panel');
-  if (addr) { showSource(addr); return; }
+  const a = route().params.get('s'), p = $('panel');
+  if (a) { showSource(a); return; }
   if (!p.hidden) {
     p.hidden = true; $('scrim').hidden = true; p.replaceChildren(); delete S.painted.panel;
     const back = opener && document.querySelector('[data-k="' + CSS.escape(opener) + '"]');
@@ -549,7 +488,7 @@ function render() {
     window.scrollTo(0, 0);
   }
   S.justActed = false;
-  const half = Math.floor(Date.now() / 30000); // countdowns move on even when nothing else changes
+  const half = Math.floor(Date.now() / 30000); // time left moves on even when nothing else changes
   if (r.view === 'now') paint($('body'), JSON.stringify([S.st && Object.assign({}, S.st, { now: 0 }), S.armed, S.flash, half]), viewNow);
   else if (r.view === 'activity') viewActivity();
   else if (r.view === 'coverage') paint($('body'), JSON.stringify([S.cov, S.allAssets, S.cell]), viewCoverage);

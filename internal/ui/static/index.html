@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#131316">
+<meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex">
 <title>afw</title>
 <link rel="stylesheet" href="app.css">
@@ -11,15 +11,15 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
-  <div class="brand"><strong>afw</strong> <span id="node" class="dim"></span></div>
-  <div id="status" class="pill" role="status"></div>
-  <div id="fresh" class="dim fresh" aria-live="polite"></div>
+  <div class="brand"><b>afw</b><span id="node"></span></div>
+  <nav id="nav" class="nav" aria-label="Views"></nav>
+  <div id="fresh" class="fresh" aria-live="polite"></div>
 </header>
-<nav id="nav" class="nav" aria-label="Views"></nav>
 <main id="main" tabindex="-1"><p class="loading">afw is loading.</p></main>
 <div id="scrim" class="scrim" hidden></div>
 <aside id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" hidden></aside>
 <noscript><p class="loading">This page needs JavaScript. Everything it shows is also available from the command line: <code>afw status</code>.</p></noscript>
+<script src="icons.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

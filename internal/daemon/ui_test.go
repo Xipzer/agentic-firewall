@@ -212,3 +212,31 @@ func TestInterfaceReportsTruthfully(t *testing.T) {
 		t.Errorf("bad address: %d", w.Code)
 	}
 }
+
+// The interface must not drift back to the stock machine-made look: accent
+// stripes on card edges, pill shapes, spaced capitals, soft shadows, glass.
+// These carry no information and make every product look the same.
+func TestInterfaceKeepsItsOwnLook(t *testing.T) {
+	b, err := fs.ReadFile(ui.Files, "static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tells := map[string]*regexp.Regexp{
+		"a coloured stripe on one edge of a box": regexp.MustCompile(`border-(left|top|right):\s*[2-9]px solid var\(--(c|block|slow|fine)`),
+		"spaced capitals":                        regexp.MustCompile(`text-transform:\s*uppercase`),
+		"a soft shadow or glow":                  regexp.MustCompile(`box-shadow|drop-shadow|text-shadow`),
+		"frosted glass":                          regexp.MustCompile(`backdrop-filter`),
+		"pill or soft-card rounding":             regexp.MustCompile(`border-radius:\s*(999|[1-9]\d)px`),
+		"a stock purple, indigo or blue accent":  regexp.MustCompile(`(?i)#(4f46e5|6366f1|7c3aed|8b5cf6|a78bfa|3b82f6|2563eb)`),
+	}
+	for i, line := range strings.Split(string(b), "\n") {
+		if strings.Contains(line, ".switch") {
+			continue // a switch is the one control that is meant to be round
+		}
+		for what, re := range tells {
+			if re.MatchString(line) {
+				t.Errorf("app.css:%d has %s: %s", i+1, what, strings.TrimSpace(line))
+			}
+		}
+	}
+}

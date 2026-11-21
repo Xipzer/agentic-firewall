@@ -23,30 +23,33 @@ To let other devices on the network look without a tunnel, listen on a LAN addre
 
 ## What is on each view, and why
 
-Built to be read at a glance. State is carried by colour, size and position; words are short; detail is one tap away and never in the way.
+Built to be read at a glance. It looks like a ruled ledger, not a stack of cards.
 
 | View | The one question | What you see |
 |---|---|---|
-| **Now** | Is everything all right? | One big coloured status. Three numbers: blocked, slowed, watched. A strip of the last hour, one bar a minute. Cards for what needs you, each with one button. A card per restricted source with a bar that drains as its block runs out |
-| **Activity** | What has afw decided? | A timeline. One line per attacker: a picture for the kind of attack, the address, and three dots for how far it was escalated |
-| **A source** (opens over any view) | What is this address? | Its state and time left, the attack as steps with arrows, each piece of evidence as a strength bar (striped when it could be faked), then its history |
-| **Coverage** | What can afw not do? | A map: one square per attack type, green handled, amber partly, red a gap, with a count where it has been seen here. Bars for your most targeted services |
-| **System** | Is afw itself healthy? | A light per part. Switches for blocking and emergency mode, and the off switch |
+| **Now** | Is everything all right? | One large headline. Three numbers: blocked, slowed, watched. A strip of the last hour, one bar a minute. What needs you, each with one button. One line per restricted source, whose underline drains as its time runs out |
+| **Activity** | What has afw decided? | One line per attacker: time, a square for how hard afw acted, the address, a pictogram and two words for the kind of attack |
+| **A source** (opens over any view) | What is this address? | Its state and time left, the attack as a path with arrows, each piece of evidence with a bar for how much it counted (striped when it could be faked), then its history |
+| **Coverage** | What can afw not do? | A headline count of gaps. One square per attack type: green handled, half-amber partly, red a gap, with a number where it has been seen here. Your most targeted services as bars |
+| **System** | Is afw itself healthy? | One headline, one line per part, switches for blocking and emergency mode, and the off switch |
 
 Left out on purpose: settings (the config file is the one place for those) and the test momentum report (it describes the code, not this machine).
 
-## Design rules it follows
+## The visual system
 
-- **One look, one answer.** Every view opens with the thing that answers its question, large.
-- **Pictures before words.** Each attack type has one picture, used everywhere, so it is recognised before it is read.
-- **Colour means one thing.** Red is blocked or needs action, amber is slowed or worth a check, green is fine, grey is watching or off.
-- **Short labels, detail on tap.** Long explanations sit behind "Details"; nothing is a wall of text.
-- **Show time as a shape.** A draining bar, not "ends in 35 minutes".
-- **Only stated facts.** No empty tiles; an empty section says so in one line.
-- **Risky actions take two presses, in place.** The off switch also needs a typed word.
-- **Works on a phone**: four items in a bottom bar, 44 px targets, no sideways scrolling.
-- **Keeps your place.** Refreshes never move focus or scroll; Back closes a panel and returns you to the same row.
-- **Readable**: contrast of at least 4.5:1, one focus ring, a label on every control and picture, reduced motion respected, light and dark.
+- **One mark for state.** A small square whose fill is the severity: hollow is watching, half is slowed, solid is blocked. Hatched means "would have", in watch-only mode. It is used in every list, the headline, the filters and the map key, so it is learnt once.
+- **One row grammar.** Every list is the same ruled row with columns that line up down the page (CSS subgrid).
+- **Colour is state only.** Red, amber, green. Controls are ink on paper, in light and dark; there is no brand colour.
+- **Pictograms name the kind of attack and nothing else.** They come from Phosphor Icons (MIT, see [NOTICE.md](NOTICE.md)), embedded as path data.
+- **Short labels, detail on tap.** Risky actions take two presses in place; the off switch also needs a typed word.
+- **Time is a shape.** A draining underline, not "ends in 35 minutes".
+- Works on a phone, keeps your place on refresh and Back, 4.5:1 contrast, visible focus, reduced motion respected.
+
+## What it refuses to look like
+
+The first two versions looked machine-made. A test now fails the build if the stylesheet brings any of these back: a coloured stripe down one edge of a box, pill-shaped badges and soft rounded cards, spaced capital-letter labels, soft shadows and glows, frosted glass, or a stock purple or blue accent. Tinted icon chips, identical card grids and centred icon-in-a-dashed-box empty states are gone too. The checklist these came from is a public catalogue of AI design tells ([unslop-ui-skill TELLS.md](https://github.com/claudiusararu/unslop-ui-skill/blob/main/TELLS.md)); the colour-as-a-stripe pattern is called out there as one of the most reliable.
+
+It leans on current CSS instead of decoration: `light-dark()` and OKLCH colours mixed with `color-mix()` in OKLab, cascade layers, subgrid rows, `:has()`, `@starting-style` for the panel, and `interpolate-size` for opening details.
 
 ## Why it is safe to run on a firewall
 
