@@ -1099,5 +1099,16 @@ func (e *Engine) ActiveList(now time.Time) []ActiveInfo {
 	return out
 }
 
+// WatchingCount is how many subjects are flagged for watching and nothing more.
+func (e *Engine) WatchingCount(now time.Time) int {
+	n := 0
+	for _, a := range e.active {
+		if now.Before(a.until) && a.action == afp.ActionObserve {
+			n++
+		}
+	}
+	return n
+}
+
 // Active reports the number of subjects with a live action.
 func (e *Engine) Active() int { return len(e.active) }

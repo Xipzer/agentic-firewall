@@ -135,7 +135,8 @@ func TestInterfaceNeverWritesHTML(t *testing.T) {
 				t.Errorf("%s:%d uses %q", path, i+1, m)
 			}
 		}
-		if strings.Contains(string(b), "http://") || strings.Contains(string(b), "https://") || strings.Contains(string(b), "//cdn") {
+		text := strings.ReplaceAll(string(b), "http://www.w3.org/2000/svg", "") // the SVG namespace is a name, not a request
+		if strings.Contains(text, "http://") || strings.Contains(text, "https://") || strings.Contains(text, "//cdn") {
 			t.Errorf("%s refers to something outside this machine", path)
 		}
 		return nil

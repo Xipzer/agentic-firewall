@@ -23,28 +23,30 @@ To let other devices on the network look without a tunnel, listen on a LAN addre
 
 ## What is on each view, and why
 
-| View | The question it answers | What is there |
-|---|---|---|
-| **Now** | Is everything all right, and does anything need me? | The mode in one sentence. "Needs you": only things a person must decide (confirm blocking, a break-in chain, a device inside the network misbehaving, emergency mode, a suspended adviser, a broken part). What is restricted right now, why, when it ends, and Unblock. One sentence for the last 24 hours |
-| **Activity** | What has afw decided? | Every decision, newest first, one row per attacker showing where it ended up. Filters and a search by address |
-| **A source** (opens over any view) | What do we know about this address? | Its state, why (each piece of evidence, marked if it could be faked), everything it has done, its history, Unblock |
-| **Coverage** | What can afw not do? | Attacks seen here. The attack types afw cannot fully see or stop, listed on purpose. Which of your services are being targeted |
-| **System** | Is afw itself healthy? | Sensors, firewall counters, decoys, adviser, linked nodes, threat lists, the never-blocked list. The controls: blocking on or off, emergency mode, the off switch |
+Built to be read at a glance. State is carried by colour, size and position; words are short; detail is one tap away and never in the way.
 
-Left out on purpose: charts (nothing here is better read as a chart than as a sentence or a list), settings (the config file is the one place for those), and the test momentum report (it describes the code, not this machine).
+| View | The one question | What you see |
+|---|---|---|
+| **Now** | Is everything all right? | One big coloured status. Three numbers: blocked, slowed, watched. A strip of the last hour, one bar a minute. Cards for what needs you, each with one button. A card per restricted source with a bar that drains as its block runs out |
+| **Activity** | What has afw decided? | A timeline. One line per attacker: a picture for the kind of attack, the address, and three dots for how far it was escalated |
+| **A source** (opens over any view) | What is this address? | Its state and time left, the attack as steps with arrows, each piece of evidence as a strength bar (striped when it could be faked), then its history |
+| **Coverage** | What can afw not do? | A map: one square per attack type, green handled, amber partly, red a gap, with a count where it has been seen here. Bars for your most targeted services |
+| **System** | Is afw itself healthy? | A light per part. Switches for blocking and emergency mode, and the off switch |
+
+Left out on purpose: settings (the config file is the one place for those) and the test momentum report (it describes the code, not this machine).
 
 ## Design rules it follows
 
-Taken from audits of earlier software on this machine:
-
-- **Lead with what needs the person.** Everything else is below it.
-- **Colour means something, and only one thing.** Red is blocked or needs action, amber is slowed or worth a check, green is fine, grey is watching.
-- **Only stated facts.** No empty tiles or dashes; an empty section says what is empty and the way out.
-- **Words a person would say.** "Password guessing", "ends in 8 min", "could be faked"; no class codes, no ISO dates.
-- **Risky actions take two presses, in place.** The off switch also needs a typed word. Rare controls live on System, not on every page.
+- **One look, one answer.** Every view opens with the thing that answers its question, large.
+- **Pictures before words.** Each attack type has one picture, used everywhere, so it is recognised before it is read.
+- **Colour means one thing.** Red is blocked or needs action, amber is slowed or worth a check, green is fine, grey is watching or off.
+- **Short labels, detail on tap.** Long explanations sit behind "Details"; nothing is a wall of text.
+- **Show time as a shape.** A draining bar, not "ends in 35 minutes".
+- **Only stated facts.** No empty tiles; an empty section says so in one line.
+- **Risky actions take two presses, in place.** The off switch also needs a typed word.
 - **Works on a phone**: four items in a bottom bar, 44 px targets, no sideways scrolling.
 - **Keeps your place.** Refreshes never move focus or scroll; Back closes a panel and returns you to the same row.
-- **Readable**: contrast of at least 4.5:1, one focus ring, labels on every control, reduced motion respected, light and dark.
+- **Readable**: contrast of at least 4.5:1, one focus ring, a label on every control and picture, reduced motion respected, light and dark.
 
 ## Why it is safe to run on a firewall
 

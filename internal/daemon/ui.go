@@ -65,6 +65,7 @@ type activity struct {
 	mu    sync.Mutex
 	items []Decision
 	hours [24]hourCount
+	mins  [60]hourCount // same shape, keyed by minute: the last hour at a glance
 }
 
 type hourCount struct {
@@ -85,18 +86,23 @@ func (a *activity) add(msg any) {
 		if len(a.items) > maxDecisions {
 			a.items = append(a.items[:0:0], a.items[len(a.items)-maxDecisions*3/4:]...)
 		}
-		h := m.TS.Unix() / 3600
-		b := &a.hours[h%24]
+		h, mn := m.TS.Unix()/3600, m.TS.Unix()/60
+		b, mb := &a.hours[h%24], &a.mins[mn%60]
 		if b.hour != h {
 			*b = hourCount{hour: h}
 		}
-		switch m.Action {
-		case afp.ActionDrop:
-			b.drop++
-		case afp.ActionThrottle:
-			b.throttle++
-		case afp.ActionObserve:
-			b.observe++
+		if mb.hour != mn {
+			*mb = hourCount{hour: mn}
+		}
+		for _, c := range []*hourCount{b, mb} {
+			switch m.Action {
+			case afp.ActionDrop:
+				c.drop++
+			case afp.ActionThrottle:
+				c.throttle++
+			case afp.ActionObserve:
+				c.observe++
+			}
 		}
 	case *afp.Explanation:
 		if i := a.find(m.About); i >= 0 {
@@ -128,6 +134,21 @@ func (a *activity) last24(now time.Time) (drop, throttle, observe int) {
 	for _, b := range a.hours {
 		if h-b.hour < 24 && b.hour <= h {
 			drop, throttle, observe = drop+b.drop, throttle+b.throttle, observe+b.observe
+		}
+	}
+	return
+}
+
+// pulse returns the last 60 minutes, oldest first: decisions per minute by kind.
+func (a *activity) pulse(now time.Time) (blocked, slowed, watched []int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	blocked, slowed, watched = make([]int, 60), make([]int, 60), make([]int, 60)
+	cur := now.Unix() / 60
+	for i := 0; i < 60; i++ {
+		mn := cur - int64(59-i)
+		if b := a.mins[((mn%60)+60)%60]; b.hour == mn {
+			blocked[i], slowed[i], watched[i] = b.drop, b.throttle, b.observe
 		}
 	}
 	return
@@ -190,6 +211,7 @@ type Restricted struct {
 	Subject  string     `json:"subject"`
 	Action   afp.Action `json:"action"`
 	Until    time.Time  `json:"until"`
+	Since    time.Time  `json:"since"`
 	Class    string     `json:"class,omitempty"`
 	Reason   string     `json:"reason,omitempty"`
 	Advised  bool       `json:"advised,omitempty"`
@@ -213,6 +235,12 @@ type uiState struct {
 		Watched int `json:"watched"`
 	} `json:"day"`
 	KnownUsers int `json:"known_users"`
+	Watching   int `json:"watching"`
+	Pulse      struct {
+		Blocked []int `json:"blocked"`
+		Slowed  []int `json:"slowed"`
+		Watched []int `json:"watched"`
+	} `json:"pulse"`
 	// Handled counts open incidents afw dealt with on its own.
 	Handled int `json:"handled"`
 }
@@ -236,15 +264,17 @@ func (d *Daemon) uiState(ctx context.Context, readOnly bool) uiState {
 		active = d.Engine.ActiveList(now)
 		lvl, reasons, holds = d.Posture.Level(), d.Posture.Reasons, d.Posture.Until()
 		s.KnownUsers = len(d.Engine.Trusted(now))
+		s.Watching = d.Engine.WatchingCount(now)
 	})
 	s.Posture = lvl.String()
 	for _, a := range active {
 		r := Restricted{Subject: subjectLabel(a.Subject), Action: a.Action, Until: a.Until.UTC(), Advised: a.Advised, Unproven: a.Unproven}
 		if dec, ok := d.act.latestFor(r.Subject); ok {
-			r.Class, r.Reason = dec.Class, dec.Reason
+			r.Class, r.Reason, r.Since = dec.Class, dec.Reason, dec.TS.UTC()
 		}
 		s.Restricted = append(s.Restricted, r)
 	}
+	s.Pulse.Blocked, s.Pulse.Slowed, s.Pulse.Watched = d.act.pulse(now)
 	s.Day.Blocked, s.Day.Slowed, s.Day.Watched = d.act.last24(now)
 
 	add := func(a Attention) { s.Attention = append(s.Attention, a) }
@@ -342,6 +372,7 @@ type TimelineEv struct {
 	Action   afp.Action `json:"action,omitempty"`
 	TTL      string     `json:"ttl,omitempty"`
 	Text     string     `json:"text"`
+	Class    string     `json:"class,omitempty"`
 	Priority string     `json:"priority,omitempty"`
 }
 
@@ -378,13 +409,18 @@ func (d *Daemon) sourceView(q string) (SourceView, error) {
 		case graph.KindVerdict:
 			act, _ := a["action"].(afp.Action)
 			ttl, _ := a["ttl"].(string)
-			v.Timeline = append(v.Timeline, TimelineEv{TS: nb.Node.Last.UTC(), Kind: "decision", Action: act, TTL: ttl, Text: fmt.Sprint(a["reason"])})
+			ev := TimelineEv{TS: nb.Node.Last.UTC(), Kind: "decision", Action: act, TTL: ttl, Text: fmt.Sprint(a["reason"])}
 			for _, c := range d.Graph.Neighbours(nb.Node.ID, 0) {
-				if c.Node.Kind == graph.KindClass && !seen[c.Node.ID] {
+				if c.Node.Kind != graph.KindClass {
+					continue
+				}
+				ev.Class = strings.TrimPrefix(c.Node.ID, "class:")
+				if !seen[c.Node.ID] {
 					seen[c.Node.ID] = true
-					v.Classes = append(v.Classes, strings.TrimPrefix(c.Node.ID, "class:"))
+					v.Classes = append(v.Classes, ev.Class)
 				}
 			}
+			v.Timeline = append(v.Timeline, ev)
 		case graph.KindEscalation:
 			v.Timeline = append(v.Timeline, TimelineEv{TS: nb.Node.Last.UTC(), Kind: "question", Text: fmt.Sprint(a["question"]), Priority: fmt.Sprint(a["priority"])})
 		}
