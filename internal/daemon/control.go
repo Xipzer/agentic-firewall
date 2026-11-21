@@ -36,6 +36,7 @@ type Status struct {
 	JournalDrop  uint64                       `json:"journal_dropped"`
 	Incidents    map[string]uint64            `json:"incidents"`
 	Decoys       map[string]any               `json:"decoys,omitempty"`
+	Adviser      map[string]any               `json:"adviser"`
 	Extra        map[string]map[string]uint64 `json:"-"`
 }
 
@@ -70,6 +71,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		s.Crosstalk = d.Bus.Snapshot()
 	}
 	s.Incidents = d.Incidents.Stats()
+	s.Adviser = d.adviserStatus()
 	if d.Tarpit != nil {
 		s.Decoys = d.Tarpit.Snapshot()
 	}
@@ -199,6 +201,10 @@ func (d *Daemon) ServeControl(ctx context.Context, path string, onPanic func()) 
 	mux.HandleFunc("POST /mode", func(w http.ResponseWriter, r *http.Request) {
 		err := d.SetMode(r.Context(), r.URL.Query().Get("m"))
 		reply(w, map[string]string{"mode": d.Guard.Mode()}, err)
+	})
+	mux.HandleFunc("POST /analyst/resume", func(w http.ResponseWriter, r *http.Request) {
+		d.ResumeAdviser()
+		reply(w, d.adviserStatus(), nil)
 	})
 	mux.HandleFunc("POST /breakglass", func(w http.ResponseWriter, r *http.Request) {
 		st := r.URL.Query().Get("state")

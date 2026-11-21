@@ -66,6 +66,8 @@ type Daemon struct {
 	discover  func() config.Discovered
 	done      chan struct{}
 	internal  []netip.Prefix
+	local     []netip.Prefix
+	adv       *adviser
 	ticks     int
 	running   atomic.Bool
 	// Kernel probes; replaceable in tests.
@@ -115,6 +117,8 @@ func (d *Daemon) Init() error {
 		SensitivePorts: d.Cfg.SensitivePorts, ServicePorts: d.Cfg.ServicePorts, MaxSubjects: d.Cfg.MaxSubjects, Rep: d.Feeds})
 	d.loadTrust()
 	d.internal = internal
+	d.local = local
+	d.adv = newAdviser()
 	bg := d.Cfg.BreakGlass
 	pc := posture.DefaultConfig()
 	pc.Auto, pc.MinRate, pc.Surge, pc.AbsRate, pc.FailRatio = bg.Auto, bg.MinRate, bg.Surge, bg.AbsRate, bg.FailRatio
@@ -186,6 +190,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	start(func() { d.housekeeping(ctx) })
 	if d.Tarpit != nil {
 		start(func() { d.Tarpit.Run(ctx) })
+	}
+	if sock := d.Cfg.Analyst.Socket; sock != "" {
+		start(func() {
+			if err := d.ServeAdviser(ctx, sock); err != nil {
+				d.Log.Error("adviser socket", "err", err)
+			}
+		})
 	}
 	if d.Bus != nil {
 		start(func() { d.Bus.Run(ctx) })

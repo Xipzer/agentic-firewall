@@ -58,6 +58,10 @@ A SYN or a UDP packet can carry any source address. Evidence built only from the
 
 An attacker partly controls what an active defence sees, so the design guarantees that the worst they can make it do costs less than what it stops. The key rule is **harm direction**: a verdict built from what a subject sent us only limits what that subject can start, and never touches connections we start. Forgeable evidence can only throttle, proven history earns immunity from forged evidence, and only proven evidence lengthens punishment. The full rule set, including binding rules for the LLM tier, is in [docs/self-harm.md](docs/self-harm.md).
 
+### The model is a dependency someone else controls
+
+The slow tier's model can be compromised at the provider, redirected in transit, swapped, or steered by attacker text. afw does not try to detect that first; it bounds what any answer can do. The adviser reaches afw through one socket that offers redacted briefings and a proposal form. A proposal becomes unproven evidence about a source the firewall's own evidence already flagged, so the worst a hostile model achieves is a temporary rate limit on something already suspicious. It cannot lift blocks, name victims, see the network layout, write into the memory other models read, or spread through crosstalk. Dishonest answers are strikes; three suspend it, undo its influence and call a person. [docs/untrusted-model.md](docs/untrusted-model.md).
+
 ### Machine-speed attackers
 
 Autonomous attack agents go from first probe to control in hours, probe everything, chain stages and switch paths when blocked. Three parts of the design answer that directly. **Decoy ports** turn their breadth into a tripwire: one completed connection to a port nothing uses is proven evidence, blocked in about a tenth of a second and tarpitted. **Chain detection** links stages from one source (`recon`, `access`, `decoy`, `c2`) within three hours into one `chain.*` class with a longer block and a critical escalation. And every action is safe to take **without a person**, which is what the rails are for. Sources and limits: [docs/agentic-attackers.md](docs/agentic-attackers.md).
@@ -159,7 +163,7 @@ Each tier must declare:
 - **Capabilities**, meaning which actions it may take. Policy can restrict this (for example only the slow tier may `quarantine`).
 - **Failure mode** if it is overloaded or down: `fail-open` (allow and log) or `fail-closed` (drop). Defaults to fail-open for home use, configurable per subject.
 
-Higher tiers can override lower-tier verdicts. Lower tiers never block on higher tiers.
+Lower tiers never block on higher tiers. Model tiers are **advisers, not commanders**: their output is weighted, unproven evidence for the fast tier, which decides and then passes every rail. They can slow a source the firewall already flagged; they cannot block, and only a person can lift an action. A compromised provider, a redirected endpoint and a tampered model are all assumed possible ([docs/untrusted-model.md](docs/untrusted-model.md)).
 
 ## Safety rails
 

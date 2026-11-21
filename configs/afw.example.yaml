@@ -108,6 +108,13 @@ analyst:
   per_hour: 10
   per_day: 50
   incident_window: 30m
+  # The adviser's only door into afw (redacted briefings out, proposals in).
+  # Whatever answers there is treated as untrusted: it can slow a source the
+  # firewall already flagged, never block, never unblock. Empty = no adviser.
+  socket: ""
+  provider: analyst
+  trust: 0.6
+  proposals_per_hour: 30
 
 # Reputation feeds. Chosen and rated in docs/alpha-sources.md (18 Nov 2026).
 # Every entry is sanitised: private, reserved, protected and over-wide ranges

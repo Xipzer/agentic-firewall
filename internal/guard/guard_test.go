@@ -141,3 +141,25 @@ func TestSpoofableActionsCannotDrainProvenBudget(t *testing.T) {
 		t.Fatalf("spoofable actions should be capped at half of max_active, got %d", gd2.activeOf(classSpoof))
 	}
 }
+
+// Only a person may lift an action, and model tiers can never block directly.
+func TestOnlyHumansLiftAndModelsCannotDrop(t *testing.T) {
+	gd := g(100, 100)
+	gd.Check(verdict(afp.TierFast, afp.SubjectHost, "45.9.20.7", afp.ActionDrop, "10m", false), now)
+	for _, tier := range []afp.Tier{afp.TierSlow, afp.TierMedium, afp.TierPeer, afp.TierFast} {
+		v := verdict(tier, afp.SubjectHost, "45.9.20.7", afp.ActionAllow, "")
+		out := gd.Check(v, now)
+		if !out.Refused || out.Enforce || gd.ActiveCount() != 1 {
+			t.Errorf("%s tier lifted an action: %+v", tier, out)
+		}
+	}
+	if out := gd.Check(verdict(afp.TierHuman, afp.SubjectHost, "45.9.20.7", afp.ActionAllow, ""), now); out.Refused || !out.Enforce || gd.ActiveCount() != 0 {
+		t.Errorf("a human must be able to lift: %+v", out)
+	}
+	for _, tier := range []afp.Tier{afp.TierSlow, afp.TierMedium} {
+		out := gd.Check(verdict(tier, afp.SubjectHost, "45.9.20.9", afp.ActionDrop, "10m", false), now)
+		if out.Verdict.Action != afp.ActionObserve {
+			t.Errorf("%s tier verdict was allowed to %s", tier, out.Verdict.Action)
+		}
+	}
+}

@@ -128,6 +128,15 @@ type Analyst struct {
 	PerHour        int      `yaml:"per_hour"`
 	PerDay         int      `yaml:"per_day"`
 	IncidentWindow Duration `yaml:"incident_window"`
+	// Socket is the adviser's only door into afw: it can read redacted
+	// briefings and submit proposals, nothing else. Empty turns it off.
+	Socket string `yaml:"socket"`
+	// Provider labels whoever answers on that socket (a model, local or remote).
+	Provider string `yaml:"provider"`
+	// Trust scales the adviser's confidence. Its evidence always counts as
+	// unproven, so whatever the value it can slow a source but never block one.
+	Trust            float64 `yaml:"trust"`
+	ProposalsPerHour int     `yaml:"proposals_per_hour"`
 }
 
 type Feed struct {
@@ -206,7 +215,8 @@ func Default() Config {
 		BreakGlass: BreakGlass{Auto: true, MinRate: 100, Surge: 5, AbsRate: 2000, FailRatio: 0.6,
 			Hold: Duration(10 * time.Minute), ManualHold: Duration(time.Hour), NewcomerRate: 200,
 			PerSourceRate: "2/second", Sensitivity: 2, BudgetFactor: 4},
-		Analyst:       Analyst{PerHour: 10, PerDay: 50, IncidentWindow: Duration(30 * time.Minute)},
+		Analyst: Analyst{PerHour: 10, PerDay: 50, IncidentWindow: Duration(30 * time.Minute),
+			Provider: "analyst", Trust: 0.6, ProposalsPerHour: 30},
 		Crosstalk:     Crosstalk{MaxSkew: Duration(2 * time.Minute), MaxTTL: Duration(time.Hour), PerMinute: 120},
 		Log:           Log{Path: "/var/log/afw/afw.jsonl", MaxMB: 50, Keep: 5, Observations: "evidence"},
 		NFT:           NFT{Binary: "nft", Table: "afw", LogGroup: 7, LogRate: 1000, OnExit: "keep"},
@@ -275,6 +285,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Analyst.PerHour < 0 || c.Analyst.PerDay < c.Analyst.PerHour || c.Analyst.IncidentWindow <= 0 {
 		errs = append(errs, errors.New("analyst: need 0 <= per_hour <= per_day and incident_window > 0"))
+	}
+	if a := c.Analyst; a.Trust < 0 || a.Trust > 1 || a.ProposalsPerHour < 0 || a.Provider == "" {
+		errs = append(errs, errors.New("analyst: need 0 <= trust <= 1, proposals_per_hour >= 0 and a provider label"))
+	}
+	if c.Analyst.Socket != "" && c.Analyst.Socket == c.ControlSocket {
+		errs = append(errs, errors.New("analyst: the adviser socket must not be the admin control socket"))
 	}
 	if c.Canary.Hold < 0 || c.Canary.Hold.D() > 5*time.Minute || c.Canary.MaxConns < 0 || c.Canary.MaxConns > 4096 {
 		errs = append(errs, errors.New("canary: need 0 <= hold <= 5m and 0 <= max_connections <= 4096"))

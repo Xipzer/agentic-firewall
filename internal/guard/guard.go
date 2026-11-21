@@ -96,6 +96,8 @@ type Outcome struct {
 	// BudgetExhausted means a real action was refused for lack of budget,
 	// which itself deserves a high-priority escalation.
 	BudgetExhausted bool
+	// Refused means the verdict was rejected outright and nothing changed.
+	Refused bool
 }
 
 func (g *Guard) SetMode(m string) { g.mu.Lock(); g.c.Mode = m; g.mu.Unlock() }
@@ -111,10 +113,13 @@ func (g *Guard) Protected() []netip.Prefix {
 }
 
 var capabilities = map[afp.Tier]map[afp.Action]bool{
-	afp.TierFast:   {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
-	afp.TierPeer:   {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
-	afp.TierMedium: {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
-	afp.TierSlow:   {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
+	afp.TierFast: {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
+	afp.TierPeer: {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
+	// Model tiers are advisers. Their output reaches the engine as weighted,
+	// unproven evidence (see daemon.Propose); even a verdict that claimed to
+	// come from them directly could never drop.
+	afp.TierMedium: {afp.ActionObserve: true, afp.ActionThrottle: true},
+	afp.TierSlow:   {afp.ActionObserve: true, afp.ActionThrottle: true},
 	afp.TierHuman:  {afp.ActionObserve: true, afp.ActionThrottle: true, afp.ActionDrop: true},
 }
 
@@ -146,6 +151,13 @@ func (g *Guard) Check(v *afp.Verdict, now time.Time) Outcome {
 	human := v.Source.Tier == afp.TierHuman
 
 	if v.Action == afp.ActionAllow {
+		// Only a person may lift an action. If a model or a peer could, a
+		// compromised one would simply unblock the attacker.
+		if !human {
+			note("allow refused: only a human may lift an action, not the %s tier", v.Source.Tier)
+			out.Refused = true
+			return out
+		}
 		delete(g.active, p)
 		out.Enforce = g.c.Mode == "enforce"
 		return out

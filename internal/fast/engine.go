@@ -145,6 +145,8 @@ type Engine struct {
 	grace    map[netip.Prefix]time.Time
 	ended    map[flowKey]time.Time
 	trust    map[netip.Prefix]*TrustRecord
+	// localFlag records until when the fast tier's own evidence flagged a subject
+	localFlag map[netip.Prefix]time.Time
 	// network-wide inbound pressure, read by the posture controller
 	gNew, gAttempts, gFails counter
 	sensitivity             float64
@@ -165,7 +167,7 @@ func New(p Params) *Engine {
 	}
 	e := &Engine{p: p, subjects: map[netip.Prefix]*subject{}, lru: list.New(), flows: map[flowKey]*flowRec{},
 		dirty: map[netip.Prefix]struct{}{}, active: map[netip.Prefix]activeAction{}, offences: map[netip.Prefix]int{},
-		grace: map[netip.Prefix]time.Time{}, ended: map[flowKey]time.Time{}, trust: map[netip.Prefix]*TrustRecord{}, sens: map[uint16]bool{}, svc: map[uint16]bool{}}
+		grace: map[netip.Prefix]time.Time{}, ended: map[flowKey]time.Time{}, trust: map[netip.Prefix]*TrustRecord{}, localFlag: map[netip.Prefix]time.Time{}, sens: map[uint16]bool{}, svc: map[uint16]bool{}}
 	for _, port := range p.SensitivePorts {
 		e.sens[port] = true
 	}
@@ -570,6 +572,25 @@ func (s *subject) chain(sigs []afp.Signal, now time.Time) (stages []string, prov
 	return stages, proven, last.Sub(first)
 }
 
+// LocalFlagTTL is how long a subject stays "flagged by our own evidence"
+// after the fast tier last found it suspicious.
+const LocalFlagTTL = time.Hour
+
+// Flagged reports whether the fast tier's own evidence (not a peer's or an
+// adviser's) has found this subject suspicious recently. Advisers may only
+// speak about flagged subjects, so they cannot point afw at a victim.
+func (e *Engine) Flagged(subj netip.Prefix, now time.Time) bool {
+	return now.Before(e.localFlag[subj])
+}
+
+// DropPeer removes one peer's or adviser's evidence about a subject.
+func (e *Engine) DropPeer(subj netip.Prefix, node string) {
+	if s, ok := e.subjects[subj]; ok {
+		delete(s.peers, node)
+		e.dirty[subj] = struct{}{}
+	}
+}
+
 // AddPeer records evidence about a subject reported by another node.
 func (e *Engine) AddPeer(subj netip.Prefix, node string, weight float64, spoofable bool, ttl time.Duration, reason string, now time.Time) {
 	internal := netx.Contains(e.p.Internal, subj.Addr())
@@ -826,6 +847,12 @@ func (e *Engine) evaluate(s *subject, now time.Time) (Decision, bool) {
 	local := slices.DeleteFunc(slices.Clone(sigs), func(x afp.Signal) bool { return strings.HasPrefix(x.Name, "peer:") })
 	localAct, _ := e.actionFor(combine(local, false), combine(local, true))
 	peerDerived := localAct.Severity() < act.Severity()
+	if localAct != "" {
+		if len(e.localFlag) > e.p.MaxSubjects {
+			clear(e.localFlag)
+		}
+		e.localFlag[s.key] = now.Add(LocalFlagTTL)
+	}
 
 	cur, has := e.active[s.key]
 	if has && now.Before(cur.until) {

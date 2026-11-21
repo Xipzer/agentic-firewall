@@ -72,6 +72,7 @@ Break-glass lets afw act harder in an emergency (see [attack-universe.md](attack
 
 These bind v0.2 and v0.3 before they are written:
 
+- **The model is untrusted, not just its inputs.** Its provider, endpoint or weights can be compromised. Built: it has one narrow door, its answers are only ever unproven evidence, it can never lift an action or name a source the firewall has not flagged itself, and three dishonest answers suspend it. See [untrusted-model.md](untrusted-model.md).
 - **The LLM never sees traffic as instructions.** SNI, hostnames, user agents and usernames are attacker-written text. They reach the model as quoted data, and the model's output is only ever a *proposal* that goes through the same guard.
 - **Simulate before applying.** A proposed rule is replayed against the last days of journal first. If it would have blocked established, long-lived sessions (our real usage), it is rejected or sent to a human.
 - **No rule wider than its evidence.** A compiled rule's match cannot be broader than the subjects in its provenance, without human approval.
